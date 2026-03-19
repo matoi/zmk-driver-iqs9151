@@ -17,4 +17,4 @@ properties:
   "#binding-cells":
     type: int
     required: true
-    const: 0
+    const: 2
