@@ -12,6 +12,14 @@ menuconfig ZMK_BEHAVIOR_ZIP_DYNAMIC_SCALE
       Enable the behavior that adjusts the dynamic scale factor used by
       the dynamic scaler input processor.
 
+menuconfig ZMK_BEHAVIOR_PAD_TOUCH
+    bool "Pad touch cross-pad behavior"
+    default y
+    depends on INPUT_IQS9151_CROSS_PAD
+    help
+      Enable the pad_touch behavior that receives cross-pad touch
+      state from the central side via INVOKE_BEHAVIOR.
+
 menuconfig ZMK_BEHAVIOR_ZIP_DYNAMIC_SCALE_SET
     bool "Dynamic scale set behavior"
     default y

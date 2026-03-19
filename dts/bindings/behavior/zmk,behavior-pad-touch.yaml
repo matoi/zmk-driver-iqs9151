@@ -1,0 +1,20 @@
+description: |
+  Cross-pad touch state receiver behavior.
+  Receives finger_count from the central side via INVOKE_BEHAVIOR
+  and updates the local IQS9151 driver's peer state.
+
+compatible: "zmk,behavior-pad-touch"
+
+properties:
+  display-name:
+    type: string
+
+  label:
+    type: string
+    required: false
+    deprecated: true
+
+  "#binding-cells":
+    type: int
+    required: true
+    const: 0

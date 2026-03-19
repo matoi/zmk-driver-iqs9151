@@ -10,3 +10,10 @@ properties:
     type: phandle-array
     required: true
     description: Interrupt GPIO for IQS9151 driver.
+  cross-pad-peer-input:
+    type: phandle
+    required: false
+    description: |
+      Reference to the zmk,input-split proxy device that receives
+      input events from the peer side's trackpad. Used on the central
+      side to listen for cross-pad EV_MSC events from the peripheral.

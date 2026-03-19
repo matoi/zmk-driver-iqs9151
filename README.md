@@ -1,10 +1,10 @@
-﻿# zmk-driver-iqs9151
+# zmk-driver-iqs9151
 
-私が自作したIQS9151トラックパッドモジュールをZMKで使用するための専用ドライバです。  
-トラックパッドによるカーソル移動/タップ/スクロール/ピンチインアウトや複数指ジェスチャなどの操作を扱えるようになります。  
+私が自作したIQS9151トラックパッドモジュールをZMKで使用するための専用ドライバです。
+トラックパッドによるカーソル移動/タップ/スクロール/ピンチインアウトや複数指ジェスチャなどの操作を扱えるようになります。
 また、ZMKからトラックパッドの動作設定を行いやすくする為の拡張機能がいくつか追加されます。
 
-トラックパッドモジュールは[Booth（準備中）](https://shininet.booth.pm/)より入手可能です。  
+トラックパッドモジュールは[Booth（準備中）](https://shininet.booth.pm/)より入手可能です。
 
 <img width="600"  alt="image" src="https://github.com/user-attachments/assets/76c1e221-bab2-4d7d-9250-408a9b767e39" />
 
@@ -17,11 +17,12 @@
 - 滑らかな慣性カーソル/スクロール対応
 - ZMKのキーマップ連携（レイヤーごとに動作の割り当て可能）
 - カーソルやスクロールの速度をリアルタイムに調整可能（電源OFFで設定が消えない）
+- **クロスパッドジェスチャー**: 左右分割キーボードで両側のトラックパッドを同時に使い、ピンチズームやドラッグ&ドロップが可能
 
 
 ## クイックスタート
 
-ここでは最小構成での導入手順を示します。  
+ここでは最小構成での導入手順を示します。
 前提となるZMKの基本構成・ビルド手順は本ドキュメントでは取り扱いません。
 
 ### 1. `west.yml` にモジュールを追加
@@ -93,7 +94,7 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 - `3.3V` -> 3.3V電源
 - `GND` -> GND
 
-※SDA/SCL/DRのプルアップ抵抗はトラックパッド側に4.7KΩ実装済みなので不要。  
+※SDA/SCL/DRのプルアップ抵抗はトラックパッド側に4.7KΩ実装済みなので不要。
 
 <img width="447" height="202" alt="image" src="https://github.com/user-attachments/assets/e2b8f28e-d779-4635-be67-05a65c6e2911" />
 
@@ -103,9 +104,107 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 - 1～3本指タップによる左右中クリック、長押しによるプレスホールドを確認
 - 3本指左右スワイプによるマウスボタン4-5(進む戻る)の出力を確認
 
-※更なる動作をキーマップから設定できるようにするにはコンフィグ及びDTSの設定が必要です。  
-  
-  
+※更なる動作をキーマップから設定できるようにするにはコンフィグ及びDTSの設定が必要です。
+
+
+## クロスパッドジェスチャー
+
+左右分割キーボードの両側にトラックパッドがある構成で、両側を同時にタッチすることで特殊ジェスチャーを実行する機能です。
+
+### 使えるジェスチャー
+
+| 左 | 右 | 動作 |
+|:--:|:--:|------|
+| 1本指 | 1本指 | **ピンチイン・アウト** — 指を外側/内側に動かしてズーム |
+| 1本指 | 2本指 | **プレス＆ホールド** — 左クリックを押しながらカーソル移動（ドラッグ） |
+| 2本指 | 1本指 | **プレス＆ホールド** — 同上 |
+| 2本指 | 2本指 | **プレス＆ホールド** — 同上 |
+
+※ジェスチャーの割り当ては `iqs9151_cross_pad_resolve()` の switch 文を編集することで変更可能です。
+
+### セットアップ
+
+クロスパッドジェスチャーを使用するには、以下の3つの設定が必要です。
+
+#### 1. `.conf` — 左右それぞれに追加
+
+**左側 (peripheral):**
+```conf
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT=y
+```
+
+**右側 (central):**
+```conf
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
+```
+
+#### 2. DTS — `pdt` ビヘイビアの定義
+
+共通の `.dtsi` ファイルに以下を追加します（central → peripheral 通信に必要）:
+
+```dts
+/ {
+    behaviors {
+        pdt: pdt {
+            compatible = "zmk,behavior-pad-touch";
+            #binding-cells = <0>;
+        };
+    };
+};
+```
+
+#### 3. DTS — central 側の overlay
+
+central 側の overlay で、peripheral のトラックパッドを `cross-pad-peer-input` として指定します:
+
+```dts
+&iqs9151 {
+    cross-pad-peer-input = <&trackpad_split_L>;
+};
+```
+
+`trackpad_split_L` は peripheral 側のトラックパッド入力を受け取る `zmk,input-split` デバイスです。
+
+### Kconfig オプション
+
+| 設定 | 型 | デフォルト | 説明 |
+|------|----|-----------|------|
+| `CONFIG_INPUT_IQS9151_CROSS_PAD` | bool | `n` | クロスパッドジェスチャーの有効化 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT` | choice | — | このトラックパッドが左側であることを指定 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | このトラックパッドが右側であることを指定 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | ピンチのホイール出力ゲイン (10=1.0倍, 40=4.0倍, 80=8.0倍) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | ピンチ時の修飾キー (0=なし, 1=Left Ctrl, 2=Mouse Button 4) |
+
+**修飾キーの選択について:**
+- `1` (Left Ctrl): ほとんどのOSで Ctrl+Wheel ズームとして動作します（デフォルト）
+- `2` (Mouse Button 4): macOS で BetterTouchTool 等のユーティリティを使用し、MB4 に smart zoom を割り当てている場合に便利です
+- `0` (なし): REL_WHEEL のみ出力。修飾キーの制御を別の方法で行う場合
+
+### 設定例
+
+左右両方の `.conf` に以下を追加する最小構成例:
+
+**左側 `.conf`:**
+```conf
+# Cross-pad gesture
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10=80
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER=1
+```
+
+**右側 `.conf`:**
+```conf
+# Cross-pad gesture
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10=80
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER=1
+```
+
+
 ## 応用編（ドキュメント整備中...）
 
 - ZMKキーマップと連携しKeymap EditorやZMK Studioからトラックパッドの動作を変更する

@@ -22,9 +22,12 @@ config INPUT_IQS9151_LOG_LEVEL
 
 config INPUT_IQS9151_INIT_PRIORITY
     int "IQS9151 init priority"
-    default 80
+    default 90
     help
       Define the initialization priority for the IQS9151 driver.
+      Must be higher than ZMK_INPUT_SPLIT_INIT_PRIORITY (default 86)
+      when cross-pad gesture support is enabled, because the driver
+      registers an INPUT_CALLBACK_DEFINE on the split proxy device.
 
 choice INPUT_IQS9151_ROTATE
     prompt "IQS9151 rotate"
@@ -347,6 +350,51 @@ config INPUT_IQS9151_3F_SWIPE_THRESHOLD
     default 200
     help
       Three-finger swipe threshold (driver-side).
+
+config INPUT_IQS9151_CROSS_PAD
+    bool "IQS9151 cross-pad gesture support"
+    default n
+    help
+      Enable cross-pad gesture support for split keyboard configurations.
+      When enabled, touching both trackpads simultaneously triggers
+      special gestures (pinch-to-zoom, etc.).
+
+if INPUT_IQS9151_CROSS_PAD
+
+choice INPUT_IQS9151_CROSS_PAD_SIDE
+    prompt "Trackpad side"
+    help
+      Which side of the split keyboard this trackpad is on.
+      Determines sign flipping for pinch direction calculation.
+
+config INPUT_IQS9151_CROSS_PAD_SIDE_LEFT
+    bool "Left"
+
+config INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT
+    bool "Right"
+
+endchoice
+
+config INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10
+    int "Cross-pad pinch wheel gain (x10)"
+    range 1 100
+    default 40
+    help
+      Gain for cross-pad pinch REL_WHEEL output.
+      10 = 1.0x, 20 = 2.0x, 40 = 4.0x.
+
+config INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER
+    int "Cross-pad pinch modifier (0=none, 1=Left Ctrl, 2=MB4)"
+    range 0 2
+    default 1
+    help
+      Modifier held during cross-pad pinch zoom.
+      Sent directly via HID, independent of keymap configuration.
+        0 = None (only REL_WHEEL is sent)
+        1 = Left Ctrl (Ctrl+Wheel zoom, works on most OSes)
+        2 = Mouse Button 4 (useful on macOS with smart zoom utilities)
+
+endif # INPUT_IQS9151_CROSS_PAD
 
 config INPUT_IQS9151_TEST
     bool "IQS9151 test hooks"

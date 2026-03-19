@@ -76,7 +76,17 @@
 |`CONFIG_INPUT_IQS9151_SCROLL_INERTIA_MIN_SAMPLES`|int|`1`|2Fスクロール慣性に必要な直近スクロールサンプル数|
 |`CONFIG_INPUT_IQS9151_SCROLL_INERTIA_MIN_AVG_SPEED`|int|`4`|2Fスクロール慣性に必要な平均速度|
 
-## 6. Test
+## 6. Cross-Pad Gesture
+
+|Symbol|Type|Default|役割|
+| - | - | - | - |
+|`CONFIG_INPUT_IQS9151_CROSS_PAD`|bool|`n`|クロスパッドジェスチャー有効化|
+|`CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT`|bool (choice)|—|トラックパッドが左側|
+|`CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT`|bool (choice)|—|トラックパッドが右側|
+|`CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10`|int|`40`|ピンチ→Wheel 変換ゲイン（x10）。有効域 `1..100`|
+|`CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER`|int|`1`|ピンチ時の修飾キー。`0`=なし, `1`=Left Ctrl, `2`=MB4。有効域 `0..2`|
+
+## 7. Test
 
 |Symbol|Type|Default|役割|
 | - | - | - | - |

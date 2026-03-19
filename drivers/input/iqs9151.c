@@ -20,6 +20,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#include <zmk/split/central.h>
+#include <zmk/behavior.h>
+#endif
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+#include <zmk/hid.h>
+#include <zmk/endpoints.h>
+#endif
+#endif
+
 LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 
 #define DT_DRV_COMPAT azoteq_iqs9151
@@ -81,6 +92,26 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define TWO_FINGER_PINCH_WHEEL_DIV 12
 #define TWO_FINGER_PINCH_WHEEL_GAIN_X10 CONFIG_INPUT_IQS9151_2F_PINCH_WHEEL_GAIN_X10
 #define TWO_FINGER_PINCH_WHEEL_GAIN_DEN 10
+
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+/* EV_MSC type (0x04) — may not be defined in Zephyr input headers */
+#ifndef INPUT_EV_MSC
+#define INPUT_EV_MSC 0x04
+#endif
+#define INPUT_MSC_CROSS_PAD_TOUCH  0x06
+#define INPUT_MSC_CROSS_PAD_SPREAD 0x07
+#define INPUT_MSC_CROSS_PAD_REL_Y  0x08
+#define CROSS_PAD_PINCH_WHEEL_DIV 12
+#define CROSS_PAD_PINCH_WHEEL_GAIN_X10 CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10
+#define CROSS_PAD_PINCH_WHEEL_GAIN_DEN 10
+#if defined(CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT)
+#define CROSS_PAD_LOCAL_SIGN  (-1)
+#define CROSS_PAD_PEER_SIGN   (1)
+#else
+#define CROSS_PAD_LOCAL_SIGN   (1)
+#define CROSS_PAD_PEER_SIGN  (-1)
+#endif
+#endif /* CONFIG_INPUT_IQS9151_CROSS_PAD */
 
 struct iqs9151_config {
     struct i2c_dt_spec i2c;
@@ -232,6 +263,17 @@ struct iqs9151_data {
     struct iqs9151_finger_history_entry finger_history[IQS9151_FINGER_HISTORY_SIZE];
     uint8_t finger_history_head;
     uint8_t finger_history_count;
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+    uint8_t cross_pad_peer_finger_count;
+    int16_t cross_pad_peer_rel_x;
+    int16_t cross_pad_peer_rel_y;
+    int32_t cross_pad_pinch_remainder;
+    bool cross_pad_ctrl_pressed;
+    bool cross_pad_hold_active;     /* press & hold: BTN_0 is held */
+    int32_t cross_pad_centroid_x;   /* previous centroid X for delta */
+    int32_t cross_pad_centroid_y;   /* previous centroid Y for delta */
+    bool cross_pad_centroid_valid;  /* true after first centroid sample */
+#endif
 };
 
 #ifdef CONFIG_INPUT_IQS9151_TEST
@@ -1712,6 +1754,455 @@ static void iqs9151_reset_gesture_states(struct iqs9151_data *data,
     iqs9151_reset_finger_history(data);
 }
 
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+
+/* Forward declarations for functions used in set_peer_state */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+static void iqs9151_cross_pad_modifier_release(void);
+static void iqs9151_cross_pad_hold_release(void);
+#endif
+
+void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
+    struct iqs9151_data *data = dev->data;
+
+    data->cross_pad_peer_finger_count = finger_count;
+
+    /*
+     * Re-evaluate hold/pinch release when peer state changes.
+     * This handles the case where the local side has already lifted all fingers
+     * (no more frames coming) and the peer update is the trigger for release.
+     */
+    const uint8_t local_fc = data->prev_frame.finger_count;
+    const uint8_t max_fc = MAX(local_fc, finger_count);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+    if (data->cross_pad_hold_active && max_fc != 2U) {
+        iqs9151_cross_pad_hold_release();
+        data->cross_pad_hold_active = false;
+        data->cross_pad_centroid_valid = false;
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+        LOG_DBG("cross-pad hold: end (peer update)");
+    }
+
+    if (data->cross_pad_ctrl_pressed) {
+        /* Pinch requires both sides touching; if peer lifted, release */
+        if (finger_count == 0U || local_fc == 0U) {
+            iqs9151_cross_pad_modifier_release();
+            data->cross_pad_ctrl_pressed = false;
+            data->cross_pad_pinch_remainder = 0;
+            data->cross_pad_peer_rel_x = 0;
+            data->cross_pad_peer_rel_y = 0;
+            data->cross_pad_centroid_valid = false;
+            LOG_DBG("cross-pad pinch: end (peer update)");
+        }
+    }
+#endif
+}
+
+void iqs9151_set_peer_rel_x(const struct device *dev, int16_t rel_x) {
+    struct iqs9151_data *data = dev->data;
+
+    data->cross_pad_peer_rel_x = rel_x;
+}
+
+void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y) {
+    struct iqs9151_data *data = dev->data;
+
+    data->cross_pad_peer_rel_y = rel_y;
+}
+
+/*
+ * Cross-pad gesture dispatch table.
+ * Maps MAX(local_fc, peer_fc) to a gesture type.
+ * To reassign, just change the value for the desired max finger count.
+ *
+ *   CROSS_PAD_GESTURE_NONE  — no cross-pad action (normal processing)
+ *   CROSS_PAD_GESTURE_PINCH — pinch in/out (Ctrl + Wheel zoom)
+ *
+ * Future gesture types (e.g. PRESS_HOLD for drag-and-drop) can be added here.
+ */
+enum cross_pad_gesture {
+    CROSS_PAD_GESTURE_NONE = 0,
+    CROSS_PAD_GESTURE_PINCH,
+    CROSS_PAD_GESTURE_PRESS_HOLD,
+};
+
+static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
+                                                         uint8_t peer_fc) {
+    if (local_fc == 0U || peer_fc == 0U) {
+        return CROSS_PAD_GESTURE_NONE;
+    }
+    switch (MAX(local_fc, peer_fc)) {
+    case 1:  return CROSS_PAD_GESTURE_PINCH;       /* both 1F → pinch */
+    case 2:  return CROSS_PAD_GESTURE_PRESS_HOLD;  /* either 2F → press & hold */
+    case 3:  return CROSS_PAD_GESTURE_NONE;         /* either 3F → reserved */
+    default: return CROSS_PAD_GESTURE_NONE;
+    }
+}
+
+/*
+ * Cross-pad pinch modifier: press/release the configured modifier directly
+ * via ZMK HID APIs, independent of keymap configuration.
+ *
+ * CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER:
+ *   0 = None, 1 = Left Ctrl, 2 = MB4
+ */
+#define CROSS_PAD_MOD_NONE  0
+#define CROSS_PAD_MOD_LCTRL 1
+#define CROSS_PAD_MOD_MB4   2
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+static void iqs9151_cross_pad_modifier_press(void) {
+#if CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER == CROSS_PAD_MOD_LCTRL
+    zmk_hid_register_mod(0x00); /* bit-position 0 = Left Ctrl */
+    zmk_endpoints_send_report(HID_USAGE_KEY);
+#elif CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER == CROSS_PAD_MOD_MB4
+    zmk_hid_mouse_button_press(3); /* MB4 = button index 3 */
+    zmk_endpoints_send_mouse_report();
+#endif
+}
+
+static void iqs9151_cross_pad_modifier_release(void) {
+#if CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER == CROSS_PAD_MOD_LCTRL
+    zmk_hid_unregister_mod(0x00); /* bit-position 0 = Left Ctrl */
+    zmk_endpoints_send_report(HID_USAGE_KEY);
+#elif CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER == CROSS_PAD_MOD_MB4
+    zmk_hid_mouse_button_release(3); /* MB4 = button index 3 */
+    zmk_endpoints_send_mouse_report();
+#endif
+}
+static void iqs9151_cross_pad_hold_press(void) {
+    zmk_hid_mouse_button_press(0); /* BTN_0 = left click */
+    zmk_endpoints_send_mouse_report();
+}
+
+static void iqs9151_cross_pad_hold_release(void) {
+    zmk_hid_mouse_button_release(0); /* BTN_0 = left click */
+    zmk_endpoints_send_mouse_report();
+}
+#endif /* CENTRAL || !SPLIT */
+
+static void iqs9151_cross_pad_cleanup_normal(struct iqs9151_data *data) {
+    const struct device *dev = data->dev;
+
+    if (data->two_finger.active && data->two_finger.mode == IQS9151_2F_MODE_PINCH) {
+        iqs9151_report_key_event(dev, INPUT_BTN_7, false, true, K_FOREVER);
+    }
+    iqs9151_release_hold(data, dev);
+    iqs9151_one_finger_reset(&data->one_finger);
+    iqs9151_two_finger_reset(&data->two_finger);
+    iqs9151_clear_one_finger_click_pending(data);
+    iqs9151_clear_two_finger_click_pending(data);
+    iqs9151_clear_three_finger_click_pending(data);
+    (void)k_work_cancel_delayable(&data->one_finger_click_work);
+    (void)k_work_cancel_delayable(&data->two_finger_click_work);
+    (void)k_work_cancel_delayable(&data->three_finger_click_work);
+    data->two_finger_one_lead_valid = false;
+    data->two_finger_tail_suppresses_cursor = false;
+    data->three_finger_one_lead_valid = false;
+    data->three_finger_two_lead_valid = false;
+    iqs9151_three_finger_reset(data);
+    iqs9151_inertia_cancel(&data->inertia_cursor, &data->inertia_cursor_work);
+    iqs9151_inertia_cancel(&data->inertia_scroll, &data->inertia_scroll_work);
+    iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
+    iqs9151_ema_reset(&data->cursor_ema_x_fp, &data->cursor_ema_y_fp);
+    iqs9151_motion_history_reset(&data->scroll_motion_history);
+    iqs9151_motion_history_reset(&data->cursor_motion_history);
+}
+
+/*
+ * Touch notification: inform the peer side of our finger_count change.
+ * Peripheral uses input_report (captured by split handler and forwarded).
+ * Central uses zmk_split_central_invoke_behavior (pad_touch behavior).
+ */
+static void iqs9151_cross_pad_notify_touch(struct iqs9151_data *data,
+                                            const struct iqs9151_frame *frame) {
+    if (frame->finger_count == data->prev_frame.finger_count) {
+        return;
+    }
+
+    /* Finger count changed — invalidate centroid to avoid jump on re-touch */
+    data->cross_pad_centroid_valid = false;
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    struct zmk_behavior_binding binding = {
+        .behavior_dev = "pdt",
+        .param1 = frame->finger_count,
+        .param2 = 0,
+    };
+    struct zmk_behavior_binding_event event = {
+        .position = 0,
+        .timestamp = k_uptime_get(),
+    };
+    zmk_split_central_invoke_behavior(0, &binding, event, true);
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT)
+    input_report(data->dev, INPUT_EV_MSC, INPUT_MSC_CROSS_PAD_TOUCH,
+                 frame->finger_count, true, K_NO_WAIT);
+#endif
+    LOG_DBG("cross-pad notify touch: fc=%d", frame->finger_count);
+}
+
+/*
+ * Compute effective centroid delta (X and Y) from absolute finger positions.
+ *
+ * Derives movement from centroid delta rather than frame->rel_x/rel_y, which
+ * is unreliable for 2+ fingers.  For 1 finger the centroid is simply
+ * finger1_x/y; for 2+ it is the midpoint of finger1/2.
+ *
+ * This matches the approach used by the normal 2F scroll/pinch code path,
+ * which also computes centroid deltas from absolute positions and works well.
+ */
+static void iqs9151_cross_pad_effective_rel(struct iqs9151_data *data,
+                                             const struct iqs9151_frame *frame,
+                                             int16_t *out_dx, int16_t *out_dy) {
+    *out_dx = 0;
+    *out_dy = 0;
+
+    if (!iqs9151_finger1_valid(frame)) {
+        return;
+    }
+
+    int32_t cx, cy;
+
+    if (frame->finger_count >= 2U && iqs9151_finger2_valid(frame)) {
+        cx = ((int32_t)frame->finger1_x + (int32_t)frame->finger2_x) / 2;
+        cy = ((int32_t)frame->finger1_y + (int32_t)frame->finger2_y) / 2;
+    } else {
+        cx = (int32_t)frame->finger1_x;
+        cy = (int32_t)frame->finger1_y;
+    }
+
+    if (data->cross_pad_centroid_valid) {
+        *out_dx = (int16_t)(cx - data->cross_pad_centroid_x);
+        *out_dy = (int16_t)(cy - data->cross_pad_centroid_y);
+    }
+
+    data->cross_pad_centroid_x = cx;
+    data->cross_pad_centroid_y = cy;
+    data->cross_pad_centroid_valid = true;
+}
+
+/*
+ * Central-side pinch: aggregate local + peer rel_x → single REL_WHEEL.
+ */
+static void iqs9151_cross_pad_pinch_calc(struct iqs9151_data *data,
+                                          int16_t local_rx) {
+    int16_t peer_rx = data->cross_pad_peer_rel_x;
+
+    if (local_rx == 0 && peer_rx == 0) {
+        return;
+    }
+
+    /* Same-sign filter: both hands moving same direction → not a pinch */
+    if ((local_rx > 0 && peer_rx > 0) || (local_rx < 0 && peer_rx < 0)) {
+        return;
+    }
+
+    int32_t local_spread = (int32_t)local_rx * CROSS_PAD_LOCAL_SIGN;
+    int32_t peer_spread = (int32_t)peer_rx * CROSS_PAD_PEER_SIGN;
+    int32_t total_spread = local_spread + peer_spread;
+
+    int32_t wheel_raw = total_spread * CROSS_PAD_PINCH_WHEEL_GAIN_X10
+                        / CROSS_PAD_PINCH_WHEEL_GAIN_DEN;
+
+    wheel_raw += data->cross_pad_pinch_remainder;
+    int16_t wheel_out = (int16_t)(wheel_raw / CROSS_PAD_PINCH_WHEEL_DIV);
+    data->cross_pad_pinch_remainder =
+        wheel_raw - ((int32_t)wheel_out * CROSS_PAD_PINCH_WHEEL_DIV);
+
+    if (wheel_out != 0) {
+        iqs9151_report_rel_event(data->dev, INPUT_REL_WHEEL,
+                                  wheel_out, true, K_NO_WAIT);
+    }
+
+    /* Consume peer_rel_x */
+    data->cross_pad_peer_rel_x = 0;
+}
+
+/*
+ * Peripheral-side pinch: send rel_x to central for aggregation.
+ */
+static void iqs9151_cross_pad_send_rel_x(struct iqs9151_data *data,
+                                           int16_t rel_x) {
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) && IS_ENABLED(CONFIG_ZMK_SPLIT)
+    if (rel_x == 0) {
+        return;
+    }
+    input_report(data->dev, INPUT_EV_MSC, INPUT_MSC_CROSS_PAD_SPREAD,
+                 rel_x, true, K_NO_WAIT);
+#endif
+}
+
+/*
+ * Peripheral-side hold: send rel_x and rel_y to central for cursor movement.
+ */
+static void iqs9151_cross_pad_send_rel_xy(struct iqs9151_data *data,
+                                            int16_t rel_x, int16_t rel_y) {
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) && IS_ENABLED(CONFIG_ZMK_SPLIT)
+    if (rel_x != 0) {
+        input_report(data->dev, INPUT_EV_MSC, INPUT_MSC_CROSS_PAD_SPREAD,
+                     rel_x, true, K_NO_WAIT);
+    }
+    if (rel_y != 0) {
+        input_report(data->dev, INPUT_EV_MSC, INPUT_MSC_CROSS_PAD_REL_Y,
+                     rel_y, true, K_NO_WAIT);
+    }
+#endif
+}
+
+/*
+ * Returns true if cross-pad handled this frame (skip normal processing).
+ * Returns false if normal processing should continue.
+ */
+static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
+                                      const struct iqs9151_frame *frame) {
+    const uint8_t local_fc = frame->finger_count;
+    const uint8_t peer_fc = data->cross_pad_peer_finger_count;
+    const enum cross_pad_gesture gesture =
+        iqs9151_cross_pad_resolve(local_fc, peer_fc);
+    const bool pinch_now = (gesture == CROSS_PAD_GESTURE_PINCH);
+    const bool hold_now_resolve = (gesture == CROSS_PAD_GESTURE_PRESS_HOLD);
+
+    /* Press & hold: stateful — stays active while MAX(local_fc, peer_fc) == 2 */
+    const uint8_t max_fc = MAX(local_fc, peer_fc);
+    const bool hold_continuing = data->cross_pad_hold_active && (max_fc == 2U);
+    const bool hold_now = hold_now_resolve || hold_continuing;
+
+    /* === Pinch transitions === */
+
+    if (pinch_now && !data->cross_pad_ctrl_pressed) {
+        /* Entering cross-pad pinch */
+        iqs9151_cross_pad_cleanup_normal(data);
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        iqs9151_cross_pad_modifier_press();
+#endif
+        data->cross_pad_ctrl_pressed = true;
+        data->cross_pad_pinch_remainder = 0;
+        data->cross_pad_centroid_valid = false;
+        LOG_DBG("cross-pad pinch: start");
+    }
+
+    if (!pinch_now && data->cross_pad_ctrl_pressed) {
+        /* Leaving cross-pad pinch */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        iqs9151_cross_pad_modifier_release();
+#endif
+        data->cross_pad_ctrl_pressed = false;
+        data->cross_pad_pinch_remainder = 0;
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+        data->cross_pad_centroid_valid = false;
+        LOG_DBG("cross-pad pinch: end");
+    }
+
+    /* === Press & hold transitions === */
+
+    if (hold_now && !data->cross_pad_hold_active) {
+        /* Entering press & hold */
+        iqs9151_cross_pad_cleanup_normal(data);
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        iqs9151_cross_pad_hold_press();
+#endif
+        data->cross_pad_hold_active = true;
+        data->cross_pad_centroid_valid = false;
+        LOG_DBG("cross-pad hold: start");
+    }
+
+    if (!hold_now && data->cross_pad_hold_active) {
+        /* Leaving press & hold */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        iqs9151_cross_pad_hold_release();
+#endif
+        data->cross_pad_hold_active = false;
+        data->cross_pad_centroid_valid = false;
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+        LOG_DBG("cross-pad hold: end");
+    }
+
+    /* === Active gesture processing === */
+
+    if (pinch_now) {
+        int16_t dx, dy;
+        iqs9151_cross_pad_effective_rel(data, frame, &dx, &dy);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        iqs9151_cross_pad_pinch_calc(data, dx);
+#else
+        iqs9151_cross_pad_send_rel_x(data, dx);
+#endif
+        return true;
+    }
+
+    if (hold_now) {
+        int16_t dx, dy;
+        iqs9151_cross_pad_effective_rel(data, frame, &dx, &dy);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        /* Add peer's movement delta */
+        dx += data->cross_pad_peer_rel_x;
+        dy += data->cross_pad_peer_rel_y;
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+
+        bool have_x = (dx != 0);
+        bool have_y = (dy != 0);
+        if (have_x) {
+            iqs9151_report_rel_event(data->dev, INPUT_REL_X, dx,
+                                      !(have_y), K_NO_WAIT);
+        }
+        if (have_y) {
+            iqs9151_report_rel_event(data->dev, INPUT_REL_Y, dy,
+                                      true, K_NO_WAIT);
+        }
+#else
+        iqs9151_cross_pad_send_rel_xy(data, dx, dy);
+#endif
+        return true;
+    }
+
+    /* No cross-pad gesture active */
+    data->cross_pad_centroid_valid = false;
+    return false;
+}
+
+/*
+ * Central-side EV_MSC listener: receives peer touch state and rel_x
+ * from the peripheral via the split transport proxy device.
+ */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) && \
+    DT_INST_NODE_HAS_PROP(0, cross_pad_peer_input)
+
+static void iqs9151_cross_pad_proxy_cb(struct input_event *evt) {
+    if (evt->type != INPUT_EV_MSC) {
+        return;
+    }
+
+    const struct device *local_dev = DEVICE_DT_GET(DT_DRV_INST(0));
+
+    switch (evt->code) {
+    case INPUT_MSC_CROSS_PAD_TOUCH:
+        iqs9151_set_peer_state(local_dev, (uint8_t)evt->value);
+        LOG_DBG("cross-pad proxy: peer fc=%d", evt->value);
+        break;
+    case INPUT_MSC_CROSS_PAD_SPREAD:
+        iqs9151_set_peer_rel_x(local_dev, (int16_t)evt->value);
+        break;
+    case INPUT_MSC_CROSS_PAD_REL_Y:
+        iqs9151_set_peer_rel_y(local_dev, (int16_t)evt->value);
+        break;
+    }
+}
+
+INPUT_CALLBACK_DEFINE(
+    DEVICE_DT_GET(DT_INST_PHANDLE(0, cross_pad_peer_input)),
+    iqs9151_cross_pad_proxy_cb);
+
+#endif /* SPLIT_ROLE_CENTRAL && cross_pad_peer_input */
+
+#endif /* CONFIG_INPUT_IQS9151_CROSS_PAD */
+
 static void iqs9151_inertia_start(struct iqs9151_inertia_state *state,
                                   struct k_work_delayable *work,
                                   const struct iqs9151_inertia_params *params,
@@ -2226,6 +2717,17 @@ static void iqs9151_process_frame(struct iqs9151_data *data,
     if (iqs9151_handle_show_reset(data, frame)) {
         return;
     }
+
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+    /* Notify peer of our finger_count change (before cross-pad logic) */
+    iqs9151_cross_pad_notify_touch(data, frame);
+
+    if (iqs9151_cross_pad_handle(data, frame)) {
+        iqs9151_update_prev_frame(data, frame, &prev_frame);
+        iqs9151_push_finger_history(data, frame->finger_count, now_ms);
+        return;
+    }
+#endif
 
     released_from_hold =
         iqs9151_update_gesture_sessions(data, frame, &prev_frame, &two_result);
