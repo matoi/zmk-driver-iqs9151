@@ -162,7 +162,7 @@ CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
     behaviors {
         pdt: pdt {
             compatible = "zmk,behavior-pad-touch";
-            #binding-cells = <0>;
+            #binding-cells = <2>;
         };
     };
 };

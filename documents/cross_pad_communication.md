@@ -180,7 +180,7 @@ Zephyr の `DT_INST(inst, compat)` は2引数形式の正式マクロ。
 /* lalapadgen2.dtsi */
 pdt: pdt {
     compatible = "zmk,behavior-pad-touch";
-    #binding-cells = <0>;
+    #binding-cells = <2>;
 };
 ```
 
