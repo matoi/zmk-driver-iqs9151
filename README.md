@@ -49,6 +49,19 @@ manifest:
     path: config
 ```
 
+> **フォークやブランチを使用する場合:**
+> `remotes` と `projects` を変更してください。例えば、クロスパッドジェスチャー機能を含むブランチを使用する場合:
+> ```yaml
+>   remotes:
+>     - name: matoi
+>       url-base: https://github.com/matoi
+>
+>   projects:
+>     - name: zmk-driver-iqs9151
+>       remote: matoi
+>       revision: feature/cross-pad-gesture
+> ```
+
 ### 2. `.conf` に必要設定を追加
 
 ```conf
