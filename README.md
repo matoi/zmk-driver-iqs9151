@@ -122,6 +122,10 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 
 ## クロスパッドジェスチャー
 
+> **⚠️ この機能は本家 ([ShiniNet/zmk-driver-iqs9151](https://github.com/ShiniNet/zmk-driver-iqs9151)) には含まれていない独自拡張の PoC (Proof of Concept) です。**
+> 動作は無保証であり、予告なく変更・削除される可能性があります。本家ドライバとの互換性も保証されません。
+> 使用するには [fork のブランチ](https://github.com/matoi/zmk-driver-iqs9151/tree/feature/cross-pad-gesture) を参照してください。
+
 左右分割キーボードの両側にトラックパッドがある構成で、両側を同時にタッチすることで特殊ジェスチャーを実行する機能です。
 
 ### 使えるジェスチャー
