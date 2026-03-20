@@ -149,7 +149,7 @@ button or modifier.
 
 ## Setup
 
-Three configuration steps are required to enable cross-pad gesture.
+Four configuration steps are required to enable cross-pad gesture.
 
 ### 1. `.conf` — add to both sides
 
@@ -191,6 +191,40 @@ Point to the peripheral's trackpad input-split device:
 ```
 
 `trackpad_split_L` is the `zmk,input-split` device that receives the peripheral's trackpad input.
+
+### 4. DTS / Keymap — cross-pad-gate input processor (central side)
+
+Add the gate node to the shared `.dtsi`:
+
+```dts
+/ {
+    cross_pad_gate: cross_pad_gate {
+        compatible = "zmk,input-processor-cross-pad-gate";
+        #input-processor-cells = <0>;
+    };
+};
+```
+
+Then add `<&cross_pad_gate>` as the **first** input-processor in every
+input-processor chain of the peripheral proxy's input listener (in the keymap):
+
+```dts
+&trackpad_listener_L {
+    input-processors =
+        <&cross_pad_gate>,
+        <&other_processors ...>;
+
+    some_layer_override {
+        input-processors =
+            <&cross_pad_gate>,
+            <&other_processors ...>;
+    };
+};
+```
+
+This suppresses leaked normal REL events from the peripheral during the BLE
+round-trip delay at gesture start. The gate is automatically activated/deactivated
+by the driver when cross-pad gestures begin and end.
 
 ### `west.yml` — using the fork
 
@@ -254,6 +288,10 @@ CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER=1
 | `behaviors/behavior_pad_touch.c` | `pdt` behavior (receives central → peripheral notifications) |
 | `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT binding (`#binding-cells = 2`) |
 | `include/iqs9151_cross_pad.h` | Public API header |
+| `include/zmk/cross_pad_gate.h` | Gate API header |
+| `input_processors/input_processor_cross_pad_gate.c` | Cross-pad gate input processor |
+| `input_processors/Kconfig` | Gate Kconfig (`ZMK_INPUT_PROCESSOR_CROSS_PAD_GATE`) |
+| `dts/bindings/input_processors/zmk,input-processor-cross-pad-gate.yaml` | Gate DT binding |
 
 ## Known Issues
 
@@ -268,6 +306,23 @@ edges, where finger contact area is reduced:
 This is a hardware characteristic. A potential software mitigation would be
 to apply special handling for finger positions near the edge, but this would
 affect the entire driver and is considered a future improvement.
+
+### Peripheral-Side Movement Asymmetry
+
+During press & hold, cursor movement driven by the peripheral (left) side
+may feel slightly less smooth than the central (right) side. This is caused
+by BLE transport characteristics:
+
+- Data arrives in bursts at BLE connection interval boundaries
+- Buffered data draining after the finger stops can feel like brief inertia
+
+Mitigations already in place:
+- **Accumulation** (`+=`): Multiple BLE events between frames are accumulated, not overwritten
+- **Immediate flush**: Peripheral data is processed as soon as it arrives via `flush_peer`, without waiting for local frames
+- **Cross-pad gate**: Suppresses leaked normal REL events at gesture start
+
+The remaining asymmetry is inherent to BLE transport and does not significantly
+impact usability in practice.
 
 ## Related Documents (Japanese)
 

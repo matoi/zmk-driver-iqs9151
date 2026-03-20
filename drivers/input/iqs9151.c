@@ -94,6 +94,9 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define TWO_FINGER_PINCH_WHEEL_GAIN_DEN 10
 
 #ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+#if IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_CROSS_PAD_GATE)
+#include <zmk/cross_pad_gate.h>
+#endif
 /* EV_MSC type (0x04) — may not be defined in Zephyr input headers */
 #ifndef INPUT_EV_MSC
 #define INPUT_EV_MSC 0x04
@@ -1765,6 +1768,7 @@ static void iqs9151_reset_gesture_states(struct iqs9151_data *data,
 static void iqs9151_cross_pad_modifier_release(void);
 static void iqs9151_cross_pad_hold_release(void);
 #endif
+static inline void iqs9151_cross_pad_gate_update(bool active);
 
 void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
     struct iqs9151_data *data = dev->data;
@@ -1786,6 +1790,7 @@ void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
         data->cross_pad_centroid_valid = false;
         data->cross_pad_peer_rel_x = 0;
         data->cross_pad_peer_rel_y = 0;
+        iqs9151_cross_pad_gate_update(false);
         LOG_DBG("cross-pad hold: end (peer update)");
     }
 
@@ -1798,6 +1803,7 @@ void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
             data->cross_pad_peer_rel_x = 0;
             data->cross_pad_peer_rel_y = 0;
             data->cross_pad_centroid_valid = false;
+            iqs9151_cross_pad_gate_update(false);
             LOG_DBG("cross-pad pinch: end (peer update)");
         }
     }
@@ -1854,6 +1860,19 @@ static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
 #define CROSS_PAD_MOD_NONE  0
 #define CROSS_PAD_MOD_LCTRL 1
 #define CROSS_PAD_MOD_MB4   2
+
+/*
+ * Cross-pad gate: suppress peripheral proxy REL events on the central
+ * while a cross-pad gesture is active.
+ */
+static inline void iqs9151_cross_pad_gate_update(bool active) {
+#if IS_ENABLED(CONFIG_ZMK_INPUT_PROCESSOR_CROSS_PAD_GATE) && \
+    (IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT))
+    zmk_cross_pad_gate_set(active);
+#else
+    ARG_UNUSED(active);
+#endif
+}
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
 static void iqs9151_cross_pad_modifier_press(void) {
@@ -2082,6 +2101,7 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
             data->cross_pad_undecided_local_fc = local_fc;
             data->cross_pad_undecided_peer_fc = peer_fc;
             iqs9151_cross_pad_cleanup_normal(data);
+            iqs9151_cross_pad_gate_update(true);
             LOG_DBG("cross-pad: undecided start (local_fc=%d, peer_fc=%d)",
                     local_fc, peer_fc);
             return true; /* swallow frame */
@@ -2110,6 +2130,7 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
     } else if (gesture == CROSS_PAD_GESTURE_NONE && data->cross_pad_undecided_ts != 0) {
         /* Was undecided, but both sides released or fc went to an unrecognized combo */
         data->cross_pad_undecided_ts = 0;
+        iqs9151_cross_pad_gate_update(false);
         LOG_DBG("cross-pad: undecided cancelled");
     }
 
@@ -2143,6 +2164,7 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
         data->cross_pad_peer_rel_x = 0;
         data->cross_pad_peer_rel_y = 0;
         data->cross_pad_centroid_valid = false;
+        iqs9151_cross_pad_gate_update(false);
         LOG_DBG("cross-pad pinch: end");
     }
 
@@ -2168,6 +2190,7 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
         data->cross_pad_centroid_valid = false;
         data->cross_pad_peer_rel_x = 0;
         data->cross_pad_peer_rel_y = 0;
+        iqs9151_cross_pad_gate_update(false);
         LOG_DBG("cross-pad hold: end");
     }
 

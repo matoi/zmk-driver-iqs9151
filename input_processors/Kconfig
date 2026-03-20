@@ -32,6 +32,15 @@ config ZMK_INPUT_PROCESSOR_DYNAMIC_SCALER_MAX_SCALE_X10
 
 endif
 
+menuconfig ZMK_INPUT_PROCESSOR_CROSS_PAD_GATE
+    bool "Cross-pad gate input processor"
+    default y
+    depends on INPUT_IQS9151_CROSS_PAD
+    help
+      Suppresses REL events from the peripheral proxy device while
+      a cross-pad gesture is active. Prevents leaked normal cursor
+      movement during the BLE round-trip delay at gesture start.
+
 menuconfig ZMK_INPUT_PROCESSOR_BEHAVIORS_CONSUME
     bool "Behaviors consume input processor"
     default y

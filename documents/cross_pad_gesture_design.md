@@ -195,6 +195,101 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 | `behaviors/behavior_pad_touch.c` | `pdt` ビヘイビア (central → peripheral 通信の受信側) |
 | `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング (`#binding-cells = 2`) |
 | `include/iqs9151_cross_pad.h` | 公開 API ヘッダ |
+| `include/zmk/cross_pad_gate.h` | Gate API ヘッダ |
+| `input_processors/input_processor_cross_pad_gate.c` | Cross-pad gate input processor |
+| `input_processors/Kconfig` | Gate Kconfig (`ZMK_INPUT_PROCESSOR_CROSS_PAD_GATE`) |
+| `dts/bindings/input_processors/zmk,input-processor-cross-pad-gate.yaml` | Gate DT バインディング |
+
+## ペリフェラル側の応答性改善
+
+### 問題
+
+ペリフェラル（左側）の指の動きによるカーソル移動やピンチが、
+セントラル（右側）と比べてスムーズさや移動量が異なっていた。
+特にプレス＆ホールド（カーソル移動）で顕著。
+
+### 原因
+
+1. **データ上書きロス**: ペリフェラルから BLE 経由で届く `peer_rel_x`/`peer_rel_y` を
+   `=` で上書きしていたため、セントラルのローカルフレーム間に複数の MSC イベントが
+   届くと中間データが消失していた
+2. **処理タイミングの遅延**: ペリフェラルの移動データが届いても、セントラルの次の
+   ローカルフレーム処理まで消費されなかった
+
+### 対策（実装済み）
+
+1. **累積代入** (`+=`): `set_peer_rel_x`/`set_peer_rel_y` を上書き (`=`) から
+   累積 (`+=`) に変更。複数の BLE イベントが到着してもデータが失われない
+2. **即時フラッシュ** (`flush_peer`): ペリフェラルの MSC データが `proxy_cb` に
+   到着した時点で即座にピンチ計算 / カーソル移動を実行。ローカルフレーム待ちが不要に
+
+### 残課題: BLE ラウンドトリップ遅延による通常処理漏れ
+
+セントラルがクロスパッド開始を検知してからペリフェラルに通知が届くまでの
+BLE ラウンドトリップ（数十 ms）の間、ペリフェラルは `peer_fc = 0` のままであり、
+`cross_pad_handle` が `false` を返して通常カーソル処理が走る。
+
+この漏れた通常処理により:
+- ペリフェラル側で慣性追跡 (inertia EMA) が数フレーム走る
+- 通常の REL イベントが split transport 経由でセントラルに届く
+- セントラルではクロスパッド中にもかかわらず、通常カーソル移動が発生する
+
+**影響**: プレス＆ホールドでカーソル移動に慣性が合算されたような挙動になる。
+ピンチ（wheel イベント）では視覚的にほぼ気にならない。
+
+### 対策（実装済み）: `cross-pad-gate` input-processor
+
+セントラル側で、ペリフェラル proxy device からの REL イベントを抑制する
+カスタム input-processor を導入した。
+
+**設計方針:**
+
+- セントラルはクロスパッド開始を**遅延なしで検知**できる（自分の fc を即座に知っている）
+- ペリフェラル側の変更や通常操作への遅延追加は不要
+
+**構成要素:**
+
+1. **input-processor**: `zmk,input-processor-cross-pad-gate`
+   - 共有フラグ（atomic）を持つ
+   - フラグ ON かつ `INPUT_EV_REL` → `ZMK_INPUT_PROC_STOP`（イベント破棄）
+   - フラグ OFF または `INPUT_EV_REL` 以外 → `ZMK_INPUT_PROC_CONTINUE`（通過）
+
+2. **IQS9151 ドライバとの連携**: クロスパッド開始時にフラグ ON、終了時に OFF
+
+3. **DTS 設定**: ペリフェラル proxy の input-listener の**全ての** input-processor チェインの
+   先頭に挿入する（デフォルト・レイヤーオーバーライドを含む全チェイン）
+   ```dts
+   &trackpad_listener_L {
+       input-processors = <&cross_pad_gate>, <&existing_processors ...>;
+       some_layer_override {
+           input-processors = <&cross_pad_gate>, <&existing_processors ...>;
+       };
+   };
+   ```
+
+**ZMK input-processor パイプラインの特性:**
+
+- `ZMK_INPUT_PROC_STOP` を返すと、後続の processor も含め処理が中断され、
+  HID レポートが一切生成されない
+- processor チェインの順序は DTS で定義され、**決定的**（リンカ順序に依存しない）
+- `cross_pad_proxy_cb`（MSC 受信）は `INPUT_CALLBACK_DEFINE` 経由であり、
+  input-processor パイプラインとは独立して動作するため影響を受けない
+
+**補足: gate で解決できない BLE 転送特性**
+
+gate はジェスチャー開始時の通常処理漏れを防ぐが、ホールド中のペリフェラル側
+カーソル移動の品質差（BLE 接続間隔によるバースト到着、パイプライン残留）は
+BLE 通信の本質的な特性であり、gate の対象外。
+この影響は累積代入 (`+=`) と即時フラッシュ (`flush_peer`) で緩和済みであり、
+実使用上は問題にならないレベルまで改善されている。
+
+**検討したが採用しなかった案:**
+
+| 案 | 不採用理由 |
+|----|-----------|
+| ペリフェラル側で通常処理を遅延 | 片側だけの通常操作にも遅延が生じる |
+| `INPUT_CALLBACK_DEFINE` で `evt->value = 0` に書き換え | コールバック順序がリンカ依存で制御不可 |
+| ZMK レイヤー切り替えで processor チェインを変更 | レイヤー活性化の副作用、複雑性 |
 
 ## 既知の課題・制限事項
 

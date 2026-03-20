@@ -1,0 +1,7 @@
+description: |
+  Suppresses REL events from the peripheral proxy device while
+  a cross-pad gesture is active on the central side.
+
+compatible: "zmk,input-processor-cross-pad-gate"
+
+include: ip_zero_param.yaml
