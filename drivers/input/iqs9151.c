@@ -102,6 +102,7 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define INPUT_MSC_CROSS_PAD_SPREAD 0x07
 #define INPUT_MSC_CROSS_PAD_REL_Y  0x08
 #define CROSS_PAD_PINCH_WHEEL_DIV 12
+#define CROSS_PAD_STABILIZE_MS 50 /* wait for finger_count to stabilize before starting gesture */
 #define CROSS_PAD_PINCH_WHEEL_GAIN_X10 CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10
 #define CROSS_PAD_PINCH_WHEEL_GAIN_DEN 10
 #if defined(CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT)
@@ -273,6 +274,9 @@ struct iqs9151_data {
     int32_t cross_pad_centroid_x;   /* previous centroid X for delta */
     int32_t cross_pad_centroid_y;   /* previous centroid Y for delta */
     bool cross_pad_centroid_valid;  /* true after first centroid sample */
+    int64_t cross_pad_undecided_ts; /* 0 = not undecided; >0 = timestamp when undecided started */
+    uint8_t cross_pad_undecided_local_fc; /* fc snapshot when undecided started */
+    uint8_t cross_pad_undecided_peer_fc;  /* peer fc snapshot when undecided started */
 #endif
 };
 
@@ -2060,11 +2064,59 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
     const uint8_t peer_fc = data->cross_pad_peer_finger_count;
     const enum cross_pad_gesture gesture =
         iqs9151_cross_pad_resolve(local_fc, peer_fc);
+    const uint8_t max_fc = MAX(local_fc, peer_fc);
+
+    /*
+     * Stabilization: when a new gesture is detected (no gesture currently active),
+     * wait CROSS_PAD_STABILIZE_MS for finger_count to settle before committing.
+     * This prevents transient fc (e.g. placing 2 fingers one at a time) from
+     * briefly triggering the wrong gesture.
+     */
+    const bool gesture_active = data->cross_pad_ctrl_pressed || data->cross_pad_hold_active;
+
+    if (!gesture_active && gesture != CROSS_PAD_GESTURE_NONE) {
+        /* A gesture wants to start, but we may need to stabilize first */
+        if (data->cross_pad_undecided_ts == 0) {
+            /* Enter undecided state */
+            data->cross_pad_undecided_ts = k_uptime_get();
+            data->cross_pad_undecided_local_fc = local_fc;
+            data->cross_pad_undecided_peer_fc = peer_fc;
+            iqs9151_cross_pad_cleanup_normal(data);
+            LOG_DBG("cross-pad: undecided start (local_fc=%d, peer_fc=%d)",
+                    local_fc, peer_fc);
+            return true; /* swallow frame */
+        }
+
+        /* Already undecided — check if fc changed (restart timer) */
+        if (local_fc != data->cross_pad_undecided_local_fc ||
+            peer_fc != data->cross_pad_undecided_peer_fc) {
+            data->cross_pad_undecided_ts = k_uptime_get();
+            data->cross_pad_undecided_local_fc = local_fc;
+            data->cross_pad_undecided_peer_fc = peer_fc;
+            LOG_DBG("cross-pad: undecided restart (local_fc=%d, peer_fc=%d)",
+                    local_fc, peer_fc);
+            return true; /* swallow frame */
+        }
+
+        /* fc stable — check if enough time has passed */
+        if ((k_uptime_get() - data->cross_pad_undecided_ts) < CROSS_PAD_STABILIZE_MS) {
+            return true; /* still waiting */
+        }
+
+        /* Stabilized! Clear undecided and fall through to gesture start */
+        data->cross_pad_undecided_ts = 0;
+        LOG_DBG("cross-pad: stabilized (local_fc=%d, peer_fc=%d)",
+                local_fc, peer_fc);
+    } else if (gesture == CROSS_PAD_GESTURE_NONE && data->cross_pad_undecided_ts != 0) {
+        /* Was undecided, but both sides released or fc went to an unrecognized combo */
+        data->cross_pad_undecided_ts = 0;
+        LOG_DBG("cross-pad: undecided cancelled");
+    }
+
     const bool pinch_now = (gesture == CROSS_PAD_GESTURE_PINCH);
     const bool hold_now_resolve = (gesture == CROSS_PAD_GESTURE_PRESS_HOLD);
 
     /* Press & hold: stateful — stays active while MAX(local_fc, peer_fc) == 2 */
-    const uint8_t max_fc = MAX(local_fc, peer_fc);
     const bool hold_continuing = data->cross_pad_hold_active && (max_fc == 2U);
     const bool hold_now = hold_now_resolve || hold_continuing;
 
@@ -2072,7 +2124,6 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
 
     if (pinch_now && !data->cross_pad_ctrl_pressed) {
         /* Entering cross-pad pinch */
-        iqs9151_cross_pad_cleanup_normal(data);
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
         iqs9151_cross_pad_modifier_press();
 #endif

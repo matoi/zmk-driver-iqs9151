@@ -27,14 +27,18 @@ struct iqs9151_data {
     int32_t cross_pad_centroid_x;         /* 前回セントロイド X (デルタ算出用) */
     int32_t cross_pad_centroid_y;         /* 前回セントロイド Y (デルタ算出用) */
     bool cross_pad_centroid_valid;        /* true: 前回セントロイドが有効 */
+    int64_t cross_pad_undecided_ts;       /* 0=確定済み; >0=安定化待ち開始時刻 */
+    uint8_t cross_pad_undecided_local_fc; /* 安定化待ち中の local fc スナップショット */
+    uint8_t cross_pad_undecided_peer_fc;  /* 安定化待ち中の peer fc スナップショット */
 #endif
 };
 ```
 
-**設計判断: なぜ構造体やセッション状態を持たないか**
+**設計判断: フラット構造 + 安定化待ち**
 
-- 毎フレーム `local_fc` と `peer_fc` から `iqs9151_cross_pad_resolve()` でジェスチャーを導出すれば十分
+- 毎フレーム `local_fc` と `peer_fc` から `iqs9151_cross_pad_resolve()` でジェスチャーを導出
 - プレス＆ホールドのステートフルな継続は `hold_active` + `MAX == 2` で管理
+- ジェスチャー開始前に `undecided_ts` による安定化待ちで過渡状態を回避
 - `session_active` / `gesture_active` 等は不要
 - フラット構造により、コードが単純になり、状態の不整合が起きにくい
 
@@ -119,6 +123,7 @@ Kconfig の choice からコンパイル時に符号反転方向を決定する:
 #define INPUT_MSC_CROSS_PAD_SPREAD 0x07  /* ピンチ/ホールド中の rel_x 通知 */
 #define INPUT_MSC_CROSS_PAD_REL_Y  0x08  /* ホールド中の rel_y 通知 */
 #define CROSS_PAD_PINCH_WHEEL_DIV  12
+#define CROSS_PAD_STABILIZE_MS     50  /* 安定化待ち時間 */
 ```
 
 ## 公開 API
@@ -157,6 +162,7 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | MSC コード値 | `0x06`, `0x07`, `0x08` | 0x05 以下は Linux/Zephyr で使用済み。0x06 以上は未使用 |
 | set_peer_state でのリリース | peer 更新時にもジェスチャー終了を評価 | ローカル側のフレーム処理が走っていない場合でも確実にリリース |
 | 再タッチ時のジャンプ防止 | `cross_pad_centroid_valid = false` | finger_count 変化時、ジェスチャー開始/終了時に無効化 |
+| ジェスチャー開始の安定化 | 50ms の安定化待ち (hold-tap 方式) | 両側タッチ検出後、fc が安定するまでフレームを飲み込む。過渡状態での誤ジェスチャー発動を防止。片側のみの操作には影響なし |
 
 ### 実機テスト結果
 
