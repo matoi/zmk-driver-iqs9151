@@ -209,11 +209,17 @@ central 側の overlay で、peripheral のトラックパッドを `cross-pad-p
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | このトラックパッドが右側であることを指定 |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | ピンチのホイール出力ゲイン (10=1.0倍, 40=4.0倍, 80=8.0倍) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | ピンチ時の修飾キー (0=なし, 1=Left Ctrl, 2=Mouse Button 4) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT` | bool | `n` | ピンチの wheel 方向を反転 |
 
 **修飾キーの選択について:**
 - `1` (Left Ctrl): ほとんどのOSで Ctrl+Wheel ズームとして動作します（デフォルト）
 - `2` (Mouse Button 4): macOS で BetterTouchTool 等のユーティリティを使用し、MB4 に smart zoom を割り当てている場合に便利です
 - `0` (なし): REL_WHEEL のみ出力。修飾キーの制御を別の方法で行う場合
+
+**ピンチの wheel 方向について:**
+ピンチの `REL_WHEEL` 出力は通常スクロールと同じ input-processor チェインを通ります。
+`zip_scroll_transform` 等でスクロール方向を反転している場合、ピンチの方向も連動して反転するため、
+`CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT=y` で補正してください。
 
 ### 設定例
 

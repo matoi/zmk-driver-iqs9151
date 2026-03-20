@@ -123,6 +123,13 @@ The modifier for pinch zoom is configurable via
 - `1` = Left Ctrl (default; Ctrl+Wheel zoom on most OSes)
 - `2` = Mouse Button 4 (for macOS utilities like BetterTouchTool)
 
+**Pinch wheel direction:** The pinch `REL_WHEEL` output passes through the same
+input-processor chain as normal scroll. If your configuration uses
+`zip_scroll_transform` to invert scroll direction (e.g. for natural scrolling),
+the pinch direction will also be affected. Set
+`CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT=y` to compensate. The default
+(`n`) produces the correct direction when no scroll transform is applied.
+
 ### Centroid Delta for Movement
 
 Both pinch and press & hold compute movement from **centroid deltas** (difference
@@ -270,6 +277,7 @@ manifest:
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | This trackpad is on the right |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x, 80=8.0x) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | Pinch modifier (0=none, 1=LCtrl, 2=MB4) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT` | bool | `n` | Invert pinch wheel direction (for scroll-transform users) |
 
 **Modifier options:**
 - `1` (Left Ctrl): Ctrl+Wheel zoom on most OSes (default)

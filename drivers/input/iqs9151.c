@@ -2034,6 +2034,9 @@ static void iqs9151_cross_pad_pinch_calc(struct iqs9151_data *data,
         wheel_raw - ((int32_t)wheel_out * CROSS_PAD_PINCH_WHEEL_DIV);
 
     if (wheel_out != 0) {
+#if !IS_ENABLED(CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT)
+        wheel_out = -wheel_out;
+#endif
         iqs9151_report_rel_event(data->dev, INPUT_REL_WHEEL,
                                   wheel_out, true, K_NO_WAIT);
     }

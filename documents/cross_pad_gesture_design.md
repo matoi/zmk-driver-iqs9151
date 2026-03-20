@@ -172,6 +172,11 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 - `1` = Left Ctrl（デフォルト。Ctrl+Wheel ズーム）
 - `2` = Mouse Button 4（macOS の smart zoom ユーティリティ向け）
 
+**ピンチの wheel 方向**: ピンチの `REL_WHEEL` 出力は通常スクロールと同じ input-processor チェインを通るため、
+`zip_scroll_transform` 等でスクロール方向を反転している環境では、ピンチの方向も連動して反転する。
+`CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT=y` でピンチ方向のみを反転して補正できる。
+デフォルト (`n`) は transform なしの環境で正しい方向になるよう設定されている。
+
 **プレス＆ホールドのボタン**: BTN_0 (左クリック) 固定。
 `zmk_hid_mouse_button_press(0)` / `zmk_hid_mouse_button_release(0)` で直接操作。
 
@@ -190,7 +195,7 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 |---------|------|
 | `drivers/input/iqs9151.c` | クロスパッド関数群、process_frame 分岐、proxy_cb |
 | `drivers/input/CMakeLists.txt` | ZMK app include パスの追加 |
-| `drivers/input/Kconfig` | `CROSS_PAD`, `CROSS_PAD_SIDE`, `CROSS_PAD_PINCH_GAIN_X10`, `CROSS_PAD_PINCH_MODIFIER` |
+| `drivers/input/Kconfig` | `CROSS_PAD`, `CROSS_PAD_SIDE`, `CROSS_PAD_PINCH_GAIN_X10`, `CROSS_PAD_PINCH_MODIFIER`, `CROSS_PAD_PINCH_INVERT` |
 | `dts/bindings/input/azoteq,iqs9151.yaml` | `cross-pad-peer-input` phandle プロパティ |
 | `behaviors/behavior_pad_touch.c` | `pdt` ビヘイビア (central → peripheral 通信の受信側) |
 | `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング (`#binding-cells = 2`) |

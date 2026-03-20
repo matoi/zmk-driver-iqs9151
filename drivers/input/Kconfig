@@ -394,6 +394,14 @@ config INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER
         1 = Left Ctrl (Ctrl+Wheel zoom, works on most OSes)
         2 = Mouse Button 4 (useful on macOS with smart zoom utilities)
 
+config INPUT_IQS9151_CROSS_PAD_PINCH_INVERT
+    bool "Invert cross-pad pinch wheel direction"
+    default n
+    help
+      Invert the REL_WHEEL output direction for cross-pad pinch gestures.
+      Use this when the scroll direction transform in your input-processor
+      chain causes pinch zoom to work in the opposite direction.
+
 endif # INPUT_IQS9151_CROSS_PAD
 
 config INPUT_IQS9151_TEST
