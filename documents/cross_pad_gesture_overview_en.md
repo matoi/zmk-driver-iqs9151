@@ -139,6 +139,25 @@ aggregates both sides' data into a single output:
 - **Pinch:** Both sides' X deltas → single `REL_WHEEL` output
 - **Press & hold:** Both sides' X/Y deltas → single `REL_X` + `REL_Y` output
 
+### Why Not Delegate to Input Processors?
+
+The cross-pad gate (REL filter) is a natural fit for an input-processor, but
+the rest of the cross-pad logic stays in the driver because:
+
+- **Gesture detection** requires aggregating both sides' `finger_count` — not
+  possible in a per-event processor
+- **Stateful transitions** (`hold_active`, `ctrl_pressed`) span multiple events
+- **HID report manipulation** (modifier/button press) is outside input-processor scope
+- The driver already decides `REL_X`/`REL_Y` vs. `REL_WHEEL` before emitting, so
+  processors only see the final event type — consistent with how the driver handles
+  normal 2-finger scroll
+
+An alternative "central-side aggregation" model (peripheral sends raw data,
+central converts based on gesture state) was also considered but rejected:
+it merely relocates the same computation without reducing complexity, and
+the two BLE communication channels (`EV_MSC` + `INVOKE_BEHAVIOR`) remain
+necessary regardless.
+
 ### Peer State Release
 
 When the peer's `finger_count` is updated via BLE (`iqs9151_set_peer_state()`),
