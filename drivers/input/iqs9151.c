@@ -1807,13 +1807,13 @@ void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
 void iqs9151_set_peer_rel_x(const struct device *dev, int16_t rel_x) {
     struct iqs9151_data *data = dev->data;
 
-    data->cross_pad_peer_rel_x = rel_x;
+    data->cross_pad_peer_rel_x += rel_x;
 }
 
 void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y) {
     struct iqs9151_data *data = dev->data;
 
-    data->cross_pad_peer_rel_y = rel_y;
+    data->cross_pad_peer_rel_y += rel_y;
 }
 
 /*
@@ -2224,6 +2224,41 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) && \
     DT_INST_NODE_HAS_PROP(0, cross_pad_peer_input)
 
+/*
+ * Immediately process accumulated peer movement on the central side.
+ * Called from the proxy callback so that peripheral-side movement is
+ * applied without waiting for the next local frame.
+ */
+static void iqs9151_cross_pad_flush_peer(const struct device *dev) {
+    struct iqs9151_data *data = dev->data;
+
+    int16_t px = data->cross_pad_peer_rel_x;
+    int16_t py = data->cross_pad_peer_rel_y;
+
+    if (data->cross_pad_ctrl_pressed) {
+        /* Pinch active: run pinch_calc with local_rx=0 (peer-only) */
+        iqs9151_cross_pad_pinch_calc(data, 0);
+    } else if (data->cross_pad_hold_active) {
+        /* Hold active: send peer movement as cursor delta immediately */
+        if (px == 0 && py == 0) {
+            return;
+        }
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+
+        bool have_x = (px != 0);
+        bool have_y = (py != 0);
+        if (have_x) {
+            iqs9151_report_rel_event(data->dev, INPUT_REL_X, px,
+                                      !(have_y), K_NO_WAIT);
+        }
+        if (have_y) {
+            iqs9151_report_rel_event(data->dev, INPUT_REL_Y, py,
+                                      true, K_NO_WAIT);
+        }
+    }
+}
+
 static void iqs9151_cross_pad_proxy_cb(struct input_event *evt) {
     if (evt->type != INPUT_EV_MSC) {
         return;
@@ -2238,9 +2273,11 @@ static void iqs9151_cross_pad_proxy_cb(struct input_event *evt) {
         break;
     case INPUT_MSC_CROSS_PAD_SPREAD:
         iqs9151_set_peer_rel_x(local_dev, (int16_t)evt->value);
+        iqs9151_cross_pad_flush_peer(local_dev);
         break;
     case INPUT_MSC_CROSS_PAD_REL_Y:
         iqs9151_set_peer_rel_y(local_dev, (int16_t)evt->value);
+        iqs9151_cross_pad_flush_peer(local_dev);
         break;
     }
 }
