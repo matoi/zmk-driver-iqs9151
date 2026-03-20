@@ -1,5 +1,9 @@
 # Cross-Pad Gesture Design
 
+> **⚠️ PoC (Proof of Concept)**
+> この機能は本家ドライバには含まれていない独自拡張です。
+> 動作は無保証であり、予告なく変更・削除される可能性があります。
+
 クロスパッドジェスチャー: 左右分割キーボードの各側にあるトラックパッド間で連携し、
 片方にタッチした状態でもう片方を操作することで特殊ジェスチャーを実現する機能の設計。
 
@@ -174,8 +178,26 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 | ファイル | 内容 |
 |---------|------|
 | `drivers/input/iqs9151.c` | クロスパッド関数群、process_frame 分岐、proxy_cb |
+| `drivers/input/CMakeLists.txt` | ZMK app include パスの追加 |
 | `drivers/input/Kconfig` | `CROSS_PAD`, `CROSS_PAD_SIDE`, `CROSS_PAD_PINCH_GAIN_X10`, `CROSS_PAD_PINCH_MODIFIER` |
 | `dts/bindings/input/azoteq,iqs9151.yaml` | `cross-pad-peer-input` phandle プロパティ |
 | `behaviors/behavior_pad_touch.c` | `pdt` ビヘイビア (central → peripheral 通信の受信側) |
-| `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング |
+| `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング (`#binding-cells = 2`) |
 | `include/iqs9151_cross_pad.h` | 公開 API ヘッダ |
+
+## 既知の課題・制限事項
+
+### トラックパッド端でのタッチ検知の不安定性
+
+IQS9151 のタッチセンサーは、トラックパッドの端付近で指の接触面積が
+小さくなると、以下の問題が発生することがある:
+
+- タッチが検出されたり消えたりする（閾値付近での振動）
+- `finger_count` が 1 ↔ 2 で揺れる
+
+これはハードウェア（センサー）の特性に起因するため、ソフトウェアでの
+完全な解決は困難。根本的な改善には、ドライバのセンシング処理で
+トラックパッド端付近の座標を特別扱いする処理の追加が必要。
+
+現状、プレス＆ホールドの途切れなど顕著な問題は報告されていないが、
+将来的に問題が顕在化した場合はデバウンスやヒステリシスの導入を検討する。

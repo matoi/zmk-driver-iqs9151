@@ -1,5 +1,7 @@
 # Cross-Pad Gesture: リファレンス
 
+> **⚠️ PoC (Proof of Concept)** — 本家ドライバには含まれていない独自拡張です。
+
 データ構造、Kconfig、設計判断の一覧。
 
 [メイン設計ドキュメント](cross_pad_gesture_design.md) に戻る。
@@ -167,6 +169,7 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | peer 側のカーソル移動 (ホールド) | ✅ peripheral の移動データが central に転送されカーソル移動に反映 |
 | ジェスチャー終了タイミング | ✅ 指を離した時点で即リリース（set_peer_state でのリリース追加後） |
 | 3本指の除外 | ✅ 3本指タッチ時に Ctrl / BTN_0 が送信されないことを確認 |
+| GitHub Actions CI ビルド | ✅ 外部モジュールとして正常にビルド・動作確認済み |
 
 ### 未決定・将来検討
 
@@ -177,3 +180,4 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | `iqs9151_stable_finger_count` デバウンス | 初期実装では省略。不安定な場合に追加を検討 |
 | ジェスチャー割り当てのカスタマイズ | `iqs9151_cross_pad_resolve()` の switch 文で管理。Kconfig 化は不要と判断 |
 | `pdt` behavior 名 | `padtouch` への変更を試みたが不具合が発生。原因未調査。現状 `pdt` のまま |
+| トラックパッド端のセンシング不安定 | ハードウェア起因。端付近で finger_count が振動する。ドライバのセンシング処理で端座標を特別扱いする改善が考えられるが、影響範囲が大きいため将来課題 |

@@ -1,5 +1,7 @@
 # Cross-Pad Gesture: 実装設計
 
+> **⚠️ PoC (Proof of Concept)** — 本家ドライバには含まれていない独自拡張です。
+
 ピンチイン・アウトおよびプレス＆ホールドの実装詳細。
 
 [メイン設計ドキュメント](cross_pad_gesture_design.md) に戻る。
@@ -305,8 +307,9 @@ void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
 | ファイル | 変更内容 |
 |---------|---------|
 | `drivers/input/iqs9151.c` | クロスパッド関数群、process_frame 分岐、proxy_cb |
+| `drivers/input/CMakeLists.txt` | ZMK app の include パス追加 (`zmk/split/central.h` 等の参照に必要) |
 | `drivers/input/Kconfig` | `CROSS_PAD`, `CROSS_PAD_SIDE`, `CROSS_PAD_PINCH_GAIN_X10`, `CROSS_PAD_PINCH_MODIFIER` |
 | `dts/bindings/input/azoteq,iqs9151.yaml` | `cross-pad-peer-input` phandle プロパティ |
 | `behaviors/behavior_pad_touch.c` | `pdt` ビヘイビア |
-| `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング |
+| `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング (`#binding-cells = 2`) |
 | `include/iqs9151_cross_pad.h` | 公開 API ヘッダ |

@@ -1815,12 +1815,11 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y) {
 /*
  * Cross-pad gesture dispatch table.
  * Maps MAX(local_fc, peer_fc) to a gesture type.
- * To reassign, just change the value for the desired max finger count.
+ * To reassign, just change the return value for the desired case.
  *
- *   CROSS_PAD_GESTURE_NONE  — no cross-pad action (normal processing)
- *   CROSS_PAD_GESTURE_PINCH — pinch in/out (Ctrl + Wheel zoom)
- *
- * Future gesture types (e.g. PRESS_HOLD for drag-and-drop) can be added here.
+ *   CROSS_PAD_GESTURE_NONE       — no cross-pad action (normal processing)
+ *   CROSS_PAD_GESTURE_PINCH      — pinch in/out (modifier + Wheel zoom)
+ *   CROSS_PAD_GESTURE_PRESS_HOLD — press & hold (BTN_0 + cursor drag)
  */
 enum cross_pad_gesture {
     CROSS_PAD_GESTURE_NONE = 0,

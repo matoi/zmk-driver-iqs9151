@@ -1,5 +1,7 @@
 # Cross-Pad Gesture: 通信設計
 
+> **⚠️ PoC (Proof of Concept)** — 本家ドライバには含まれていない独自拡張です。
+
 クロスパッドジェスチャーにおける双方向タッチ状態通知の通信設計。
 
 [メイン設計ドキュメント](cross_pad_gesture_design.md) に戻る。
