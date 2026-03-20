@@ -147,22 +147,101 @@ where the local side has already lifted all fingers (no more frames being
 generated) and the peer update is the only trigger for releasing the held
 button or modifier.
 
-## Configuration
+## Setup
 
-### Kconfig
+Three configuration steps are required to enable cross-pad gesture.
+
+### 1. `.conf` — add to both sides
+
+**Left (peripheral):**
+```conf
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT=y
+```
+
+**Right (central):**
+```conf
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
+```
+
+### 2. DTS — define `pdt` behavior
+
+Add to the shared `.dtsi` file (required for central → peripheral communication):
+
+```dts
+/ {
+    behaviors {
+        pdt: pdt {
+            compatible = "zmk,behavior-pad-touch";
+            #binding-cells = <2>;
+        };
+    };
+};
+```
+
+### 3. DTS — central-side overlay
+
+Point to the peripheral's trackpad input-split device:
+
+```dts
+&iqs9151 {
+    cross-pad-peer-input = <&trackpad_split_L>;
+};
+```
+
+`trackpad_split_L` is the `zmk,input-split` device that receives the peripheral's trackpad input.
+
+### `west.yml` — using the fork
+
+To use the cross-pad gesture feature, point your `west.yml` to the fork:
+
+```yaml
+manifest:
+  remotes:
+    - name: matoi
+      url-base: https://github.com/matoi
+
+  projects:
+    - name: zmk-driver-iqs9151
+      remote: matoi
+      revision: feature/cross-pad-gesture
+```
+
+## Kconfig Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `CONFIG_INPUT_IQS9151_CROSS_PAD` | bool | `n` | Enable cross-pad gesture |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT` | choice | — | This trackpad is on the left |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | This trackpad is on the right |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x, 80=8.0x) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | Pinch modifier (0=none, 1=LCtrl, 2=MB4) |
 
-### DTS
+**Modifier options:**
+- `1` (Left Ctrl): Ctrl+Wheel zoom on most OSes (default)
+- `2` (Mouse Button 4): For macOS utilities (e.g. BetterTouchTool) that map MB4 to smart zoom
+- `0` (None): REL_WHEEL output only
 
-A `pdt` behavior node and `cross-pad-peer-input` property are required.
-See [README](../README.md) for setup instructions.
+### Example Configuration
+
+Minimal configuration added to both sides' `.conf`:
+
+**Left `.conf`:**
+```conf
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10=80
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER=1
+```
+
+**Right `.conf`:**
+```conf
+CONFIG_INPUT_IQS9151_CROSS_PAD=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10=80
+CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER=1
+```
 
 ## Files
 
