@@ -1,5 +1,18 @@
 # zmk-driver-iqs9151
 
+## クロスパッドジェスチャー (Cross-Pad Gesture)
+
+左右分割キーボードの両側のトラックパッドを同時にタッチすることで、ピンチズームやドラッグ＆ドロップなどの特殊ジェスチャーを実行する機能です。本家には含まれていない独自拡張の PoC として、このブランチで開発中です。
+
+Cooperative gestures between two trackpads on a split keyboard — pinch zoom and drag & drop.
+This is an independent PoC extension, developed on this branch.
+
+- 📄 **[Setup & Design overview (English)](documents/cross_pad_gesture_overview_en.md)**
+- 📄 **[設計ドキュメント (日本語)](documents/cross_pad_gesture_design.md)**
+- 📋 **[設定例リポジトリ](https://github.com/matoi/zmk-config-LalaPadGen2-cross-pad-gesture-example)**
+
+---
+
 私が自作したIQS9151トラックパッドモジュールをZMKで使用するための専用ドライバです。
 トラックパッドによるカーソル移動/タップ/スクロール/ピンチインアウトや複数指ジェスチャなどの操作を扱えるようになります。
 また、ZMKからトラックパッドの動作設定を行いやすくする為の拡張機能がいくつか追加されます。
