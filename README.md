@@ -120,46 +120,56 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 ※更なる動作をキーマップから設定できるようにするにはコンフィグ及びDTSの設定が必要です。
 
 
-## クロスパッドジェスチャー
+## Cross-Pad Gesture / クロスパッドジェスチャー
 
-> **⚠️ この機能は本家 ([ShiniNet/zmk-driver-iqs9151](https://github.com/ShiniNet/zmk-driver-iqs9151)) には含まれていない独自拡張の PoC (Proof of Concept) です。**
-> 動作は無保証であり、予告なく変更・削除される可能性があります。本家ドライバとの互換性も保証されません。
-> 使用するには [fork のブランチ](https://github.com/matoi/zmk-driver-iqs9151/tree/feature/cross-pad-gesture) を参照してください。
+> **⚠️ PoC (Proof of Concept)**
+> This feature is an independent extension not included in the [upstream driver](https://github.com/ShiniNet/zmk-driver-iqs9151).
+> It comes with no warranty and may be changed or removed without notice.
+> Use the [fork branch](https://github.com/matoi/zmk-driver-iqs9151/tree/feature/cross-pad-gesture) to try it out.
+>
+> この機能は本家ドライバには含まれていない独自拡張の PoC です。
+> 動作は無保証であり、予告なく変更・削除される可能性があります。
 
-左右分割キーボードの両側にトラックパッドがある構成で、両側を同時にタッチすることで特殊ジェスチャーを実行する機能です。
+Cooperative gestures between two trackpads on a split keyboard. Touch both
+trackpads simultaneously to trigger special gestures instead of normal
+cursor/scroll behavior.
 
-### 使えるジェスチャー
+左右分割キーボードの両側のトラックパッドを同時にタッチすることで、特殊ジェスチャーを実行します。
 
-| 左 | 右 | 動作 |
-|:--:|:--:|------|
-| 1本指 | 1本指 | **ピンチイン・アウト** — 指を外側/内側に動かしてズーム |
-| 1本指 | 2本指 | **プレス＆ホールド** — 左クリックを押しながらカーソル移動（ドラッグ） |
-| 2本指 | 1本指 | **プレス＆ホールド** — 同上 |
-| 2本指 | 2本指 | **プレス＆ホールド** — 同上 |
+📄 **[Design overview (English)](documents/cross_pad_gesture_overview_en.md)** — Architecture, key design decisions, and known issues
 
-※ジェスチャーの割り当ては `iqs9151_cross_pad_resolve()` の switch 文を編集することで変更可能です。
+### Available Gestures / 使えるジェスチャー
 
-### セットアップ
+| Left / 左 | Right / 右 | Gesture / 動作 |
+|:----------:|:----------:|----------------|
+| 1 finger | 1 finger | **Pinch zoom** — move fingers apart/together horizontally / 指を外側・内側に動かしてズーム |
+| 1 finger | 2 fingers | **Press & hold** — left-click held + cursor movement (drag) / 左クリックを押しながらカーソル移動 |
+| 2 fingers | 1 finger | **Press & hold** — same as above / 同上 |
+| 2 fingers | 2 fingers | **Press & hold** — same as above / 同上 |
 
-クロスパッドジェスチャーを使用するには、以下の3つの設定が必要です。
+Gesture assignment can be changed by editing the `switch` statement in `iqs9151_cross_pad_resolve()`.
 
-#### 1. `.conf` — 左右それぞれに追加
+### Setup / セットアップ
 
-**左側 (peripheral):**
+Three configuration steps are required:
+
+#### 1. `.conf` — add to both sides / 左右それぞれに追加
+
+**Left (peripheral) / 左側:**
 ```conf
 CONFIG_INPUT_IQS9151_CROSS_PAD=y
 CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT=y
 ```
 
-**右側 (central):**
+**Right (central) / 右側:**
 ```conf
 CONFIG_INPUT_IQS9151_CROSS_PAD=y
 CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
 ```
 
-#### 2. DTS — `pdt` ビヘイビアの定義
+#### 2. DTS — define `pdt` behavior / `pdt` ビヘイビアの定義
 
-共通の `.dtsi` ファイルに以下を追加します（central → peripheral 通信に必要）:
+Add to the shared `.dtsi` file (required for central → peripheral communication):
 
 ```dts
 / {
@@ -172,9 +182,9 @@ CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
 };
 ```
 
-#### 3. DTS — central 側の overlay
+#### 3. DTS — central-side overlay / central 側の overlay
 
-central 側の overlay で、peripheral のトラックパッドを `cross-pad-peer-input` として指定します:
+Point to the peripheral's trackpad input-split device:
 
 ```dts
 &iqs9151 {
@@ -182,28 +192,28 @@ central 側の overlay で、peripheral のトラックパッドを `cross-pad-p
 };
 ```
 
-`trackpad_split_L` は peripheral 側のトラックパッド入力を受け取る `zmk,input-split` デバイスです。
+`trackpad_split_L` is the `zmk,input-split` device that receives the peripheral's trackpad input.
 
-### Kconfig オプション
+### Kconfig Options / Kconfig オプション
 
-| 設定 | 型 | デフォルト | 説明 |
-|------|----|-----------|------|
-| `CONFIG_INPUT_IQS9151_CROSS_PAD` | bool | `n` | クロスパッドジェスチャーの有効化 |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT` | choice | — | このトラックパッドが左側であることを指定 |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | このトラックパッドが右側であることを指定 |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | ピンチのホイール出力ゲイン (10=1.0倍, 40=4.0倍, 80=8.0倍) |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | ピンチ時の修飾キー (0=なし, 1=Left Ctrl, 2=Mouse Button 4) |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `CONFIG_INPUT_IQS9151_CROSS_PAD` | bool | `n` | Enable cross-pad gesture / クロスパッドジェスチャーの有効化 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT` | choice | — | This trackpad is on the left / 左側であることを指定 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | This trackpad is on the right / 右側であることを指定 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x, 80=8.0x) / ピンチのホイール出力ゲイン |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | Pinch modifier (0=none, 1=Left Ctrl, 2=MB4) / ピンチ時の修飾キー |
 
-**修飾キーの選択について:**
-- `1` (Left Ctrl): ほとんどのOSで Ctrl+Wheel ズームとして動作します（デフォルト）
-- `2` (Mouse Button 4): macOS で BetterTouchTool 等のユーティリティを使用し、MB4 に smart zoom を割り当てている場合に便利です
-- `0` (なし): REL_WHEEL のみ出力。修飾キーの制御を別の方法で行う場合
+**Modifier options / 修飾キーの選択:**
+- `1` (Left Ctrl): Ctrl+Wheel zoom on most OSes (default) / ほとんどのOSで Ctrl+Wheel ズーム（デフォルト）
+- `2` (Mouse Button 4): For macOS utilities (e.g. BetterTouchTool) that map MB4 to smart zoom
+- `0` (None): REL_WHEEL output only / REL_WHEEL のみ出力
 
-### 設定例
+### Example Configuration / 設定例
 
-左右両方の `.conf` に以下を追加する最小構成例:
+Minimal configuration added to both sides' `.conf`:
 
-**左側 `.conf`:**
+**Left `.conf`:**
 ```conf
 # Cross-pad gesture
 CONFIG_INPUT_IQS9151_CROSS_PAD=y
@@ -212,7 +222,7 @@ CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10=80
 CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER=1
 ```
 
-**右側 `.conf`:**
+**Right `.conf`:**
 ```conf
 # Cross-pad gesture
 CONFIG_INPUT_IQS9151_CROSS_PAD=y
