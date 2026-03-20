@@ -120,54 +120,49 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 ※更なる動作をキーマップから設定できるようにするにはコンフィグ及びDTSの設定が必要です。
 
 
-## Cross-Pad Gesture / クロスパッドジェスチャー
+## Cross-Pad Gesture
 
 > **⚠️ PoC (Proof of Concept)**
 > This feature is an independent extension not included in the [upstream driver](https://github.com/ShiniNet/zmk-driver-iqs9151).
 > It comes with no warranty and may be changed or removed without notice.
 > Use the [fork branch](https://github.com/matoi/zmk-driver-iqs9151/tree/feature/cross-pad-gesture) to try it out.
->
-> この機能は本家ドライバには含まれていない独自拡張の PoC です。
-> 動作は無保証であり、予告なく変更・削除される可能性があります。
 
 Cooperative gestures between two trackpads on a split keyboard. Touch both
 trackpads simultaneously to trigger special gestures instead of normal
 cursor/scroll behavior.
 
-左右分割キーボードの両側のトラックパッドを同時にタッチすることで、特殊ジェスチャーを実行します。
+📄 **[Design overview](documents/cross_pad_gesture_overview_en.md)** — Architecture, key design decisions, and known issues
 
-📄 **[Design overview (English)](documents/cross_pad_gesture_overview_en.md)** — Architecture, key design decisions, and known issues
+### Available Gestures
 
-### Available Gestures / 使えるジェスチャー
-
-| Left / 左 | Right / 右 | Gesture / 動作 |
-|:----------:|:----------:|----------------|
-| 1 finger | 1 finger | **Pinch zoom** — move fingers apart/together horizontally / 指を外側・内側に動かしてズーム |
-| 1 finger | 2 fingers | **Press & hold** — left-click held + cursor movement (drag) / 左クリックを押しながらカーソル移動 |
-| 2 fingers | 1 finger | **Press & hold** — same as above / 同上 |
-| 2 fingers | 2 fingers | **Press & hold** — same as above / 同上 |
+| Left | Right | Gesture |
+|:----:|:-----:|---------|
+| 1 finger | 1 finger | **Pinch zoom** — move fingers apart/together horizontally to zoom |
+| 1 finger | 2 fingers | **Press & hold** — left-click held + cursor movement (drag & drop) |
+| 2 fingers | 1 finger | **Press & hold** — same as above |
+| 2 fingers | 2 fingers | **Press & hold** — same as above |
 
 Gesture assignment can be changed by editing the `switch` statement in `iqs9151_cross_pad_resolve()`.
 
-### Setup / セットアップ
+### Setup
 
 Three configuration steps are required:
 
-#### 1. `.conf` — add to both sides / 左右それぞれに追加
+#### 1. `.conf` — add to both sides
 
-**Left (peripheral) / 左側:**
+**Left (peripheral):**
 ```conf
 CONFIG_INPUT_IQS9151_CROSS_PAD=y
 CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT=y
 ```
 
-**Right (central) / 右側:**
+**Right (central):**
 ```conf
 CONFIG_INPUT_IQS9151_CROSS_PAD=y
 CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT=y
 ```
 
-#### 2. DTS — define `pdt` behavior / `pdt` ビヘイビアの定義
+#### 2. DTS — define `pdt` behavior
 
 Add to the shared `.dtsi` file (required for central → peripheral communication):
 
@@ -182,7 +177,7 @@ Add to the shared `.dtsi` file (required for central → peripheral communicatio
 };
 ```
 
-#### 3. DTS — central-side overlay / central 側の overlay
+#### 3. DTS — central-side overlay
 
 Point to the peripheral's trackpad input-split device:
 
@@ -194,22 +189,22 @@ Point to the peripheral's trackpad input-split device:
 
 `trackpad_split_L` is the `zmk,input-split` device that receives the peripheral's trackpad input.
 
-### Kconfig Options / Kconfig オプション
+### Kconfig Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `CONFIG_INPUT_IQS9151_CROSS_PAD` | bool | `n` | Enable cross-pad gesture / クロスパッドジェスチャーの有効化 |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT` | choice | — | This trackpad is on the left / 左側であることを指定 |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | This trackpad is on the right / 右側であることを指定 |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x, 80=8.0x) / ピンチのホイール出力ゲイン |
-| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | Pinch modifier (0=none, 1=Left Ctrl, 2=MB4) / ピンチ時の修飾キー |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD` | bool | `n` | Enable cross-pad gesture |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT` | choice | — | This trackpad is on the left |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_RIGHT` | choice | — | This trackpad is on the right |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x, 80=8.0x) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | Pinch modifier (0=none, 1=Left Ctrl, 2=MB4) |
 
-**Modifier options / 修飾キーの選択:**
-- `1` (Left Ctrl): Ctrl+Wheel zoom on most OSes (default) / ほとんどのOSで Ctrl+Wheel ズーム（デフォルト）
+**Modifier options:**
+- `1` (Left Ctrl): Ctrl+Wheel zoom on most OSes (default)
 - `2` (Mouse Button 4): For macOS utilities (e.g. BetterTouchTool) that map MB4 to smart zoom
-- `0` (None): REL_WHEEL output only / REL_WHEEL のみ出力
+- `0` (None): REL_WHEEL output only
 
-### Example Configuration / 設定例
+### Example Configuration
 
 Minimal configuration added to both sides' `.conf`:
 
