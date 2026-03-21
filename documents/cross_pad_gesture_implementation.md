@@ -65,10 +65,10 @@ central が両側の `rel_x` を合算して単一の `REL_WHEEL` を出力す�
 ```
 peripheral 側:
   ピンチ中 → dx (セントロイドデルタ X) を EV_MSC (MSC_CROSS_PAD_SPREAD) で central に送信
-           → 自側では REL_WHEEL を出力しない
+           → local 側では REL_WHEEL を出力しない
 
 central 側:
-  自分の dx + peer の dx (EV_MSC で受信) → 同符号フィルタ → REL_WHEEL 出力
+  local の dx + peer の dx (EV_MSC で受信) → 同符号フィルタ → REL_WHEEL 出力
 ```
 
 ### 変換ロジック (central 側)
@@ -129,7 +129,7 @@ const bool hold_continuing = data->cross_pad_hold_active && (max_fc == 2U);
 const bool hold_now = hold_now_resolve || hold_continuing;
 ```
 
-1F側が離れても(`peer_fc == 0`)、2F側が維持されていれば `MAX == 2` → 継続。
+1F 側が離れても(`peer_fc == 0`)、2F 側が維持されていれば `MAX == 2` → 継続。
 再タッチすればドラッグが再開される（カーソル位置の調整が可能）。
 
 ### 開始・終了条件
@@ -141,8 +141,8 @@ const bool hold_now = hold_now_resolve || hold_continuing;
 | `MAX != 2` かつ `hold_active` | 終了: BTN_0 release |
 
 終了トリガー:
-- 2F側が離れた or 1Fに減った → MAX < 2 → 終了
-- 3Fに変わった → MAX == 3 → 終了
+- 2F 側が離れた or 1F に減った → MAX < 2 → 終了
+- 3F に変わった → MAX == 3 → 終了
 - 両側離れた → MAX == 0 → 終了
 
 ### カーソル移動 (central 側)
@@ -198,7 +198,7 @@ static void iqs9151_cross_pad_send_rel_xy(struct iqs9151_data *data,
 | 開始条件 | `resolve() == PINCH` | `resolve() == PRESS_HOLD` |
 | 継続条件 | `resolve() == PINCH` | `MAX(local_fc, peer_fc) == 2` |
 | 終了条件 | `resolve() != PINCH` | `MAX(local_fc, peer_fc) != 2` |
-| 1F側が離れた時 | 即終了 | 継続（2F側が維持されていれば） |
+| 1F 側が離れた時 | 即終了 | 継続（2F 側が維持されていれば） |
 | HID 出力 | modifier + REL_WHEEL | BTN_0 + REL_X/Y |
 | 通常処理 | スキップ | スキップ |
 | peer データ | X のみ (`MSC_CROSS_PAD_SPREAD`) | X + Y (`SPREAD` + `REL_Y`) |
@@ -260,7 +260,7 @@ static void iqs9151_cross_pad_hold_release(void) {
 
 ## set_peer_state でのジェスチャー終了
 
-BLE 経由で peer の finger_count が更新された際、ローカル側でフレーム処理が
+BLE 経由で peer の fc が更新された際、local 側でフレーム処理が
 走っていない場合でもジェスチャーを適切に終了する必要がある。
 
 `iqs9151_set_peer_state()` 内で、ホールド・ピンチの終了条件を評価する:
@@ -281,14 +281,14 @@ void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
 }
 ```
 
-これにより、ローカル側の指が離れた後に peer の状態が変わった場合でも、
+これにより、local 側の指が離れた後に peer の状態が変わった場合でも、
 ボタン/修飾キーが正しくリリースされる。
 
 ## process_frame での分岐
 
 ```c
 #ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
-    /* タッチ状態変化を相手に通知 */
+    /* タッチ状態変化を peer に通知 */
     iqs9151_cross_pad_notify_touch(data, frame);
 
     /* クロスパッド判定: true なら通常処理をスキップ */

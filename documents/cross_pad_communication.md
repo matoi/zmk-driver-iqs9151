@@ -8,10 +8,10 @@
 
 ## 双方向タッチ状態通知
 
-各側のドライバは、相手側のタッチ状態 (指の本数) を知る必要がある。
+各側のドライバは、peer のタッチ状態 (fc) を知る必要がある。
 
-**通知の目的**: 各ドライバが「自分のパッドの指本数が変わった」ことを相手に伝える。
-これはクロスパッドジェスチャーの判定材料を相手に提供するだけであり、
+**通知の目的**: 各ドライバが「local パッドの fc が変わった」ことを peer に伝える。
+これはクロスパッドジェスチャーの判定材料を peer に提供するだけであり、
 通知自体がジェスチャーを発火させたり、通常動作を変更したりすることはない。
 
 ### 具体的なシナリオ
@@ -20,7 +20,7 @@
 例: 左パッドが peripheral、右パッドが central の場合
 
 t0: 左パッドに指を2本置く
-    → 左ドライバ: finger_count が 0→2 に変化
+    → 左ドライバ: fc が 0→2 に変化
     → 左ドライバ: input_report(EV_MSC, MSC_CROSS_PAD_TOUCH, 2) で central に通知
     → BLE split transport → central の proxy device → INPUT_CALLBACK_DEFINE で受信
     → central: cross_pad_peer_finger_count = 2
@@ -47,7 +47,7 @@ ZMK split keyboard の通信は本質的に非対称であり、
 
 ## peripheral → central: EV_MSC による input event
 
-peripheral 側のドライバが finger_count 変化時に EV_MSC イベントを送出する。
+peripheral 側のドライバが fc 変化時に EV_MSC イベントを送出する。
 
 ```c
 /* peripheral 側: notify_touch 内 */
@@ -128,7 +128,7 @@ central の overlay で設定:
 
 ## central → peripheral: INVOKE_BEHAVIOR
 
-central 側のドライバが finger_count 変化時に
+central 側のドライバが fc 変化時に
 `zmk_split_central_invoke_behavior()` を呼び出し、
 peripheral 側でカスタムビヘイビア `pdt` を起動する。
 
@@ -194,12 +194,12 @@ central 側                                peripheral 側
 ┌──────────────────┐                     ┌──────────────────┐
 │  iqs9151 driver  │                     │  iqs9151 driver  │
 │                  │                     │                  │
-│  peer_fc     ◄───┼── EV_MSC(TOUCH) ───┼─ finger_count    │
+│  peer_fc     ◄───┼── EV_MSC(TOUCH) ───┼─ fc              │
 │  peer_rel_x  ◄───┼── EV_MSC(SPREAD) ──┼─ dx              │
 │  peer_rel_y  ◄───┼── EV_MSC(REL_Y) ──┼─ dy              │
 │  (proxy_cb で受信)│                     │  (input_report)  │
 │                  │                     │                  │
-│  finger_count ───┼── INVOKE_BEHAVIOR ──┼─► peer_fc        │
+│  fc           ───┼── INVOKE_BEHAVIOR ──┼─► peer_fc        │
 │  (notify_touch)  │   ("pdt")           │  (pdt behavior   │
 │                  │                     │   で受信)         │
 └──────────────────┘                     └──────────────────┘

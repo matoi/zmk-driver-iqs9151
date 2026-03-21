@@ -18,7 +18,7 @@ struct iqs9151_data {
     /* ... 既存フィールド ... */
 
 #ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
-    uint8_t cross_pad_peer_finger_count;  /* 相手側の指本数 (通信経由で更新) */
+    uint8_t cross_pad_peer_finger_count;  /* peer の指本数 (通信経由で更新) */
     int16_t cross_pad_peer_rel_x;         /* peer から受信した rel_x (central 側のみ使用) */
     int16_t cross_pad_peer_rel_y;         /* peer から受信した rel_y (central 側のみ使用) */
     int32_t cross_pad_pinch_remainder;    /* ピンチのスケーリング剰余 */
@@ -66,7 +66,7 @@ static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
 ```
 
 - 両側にタッチがあり、`MAX == 1` → ピンチ、`MAX == 2` → プレス＆ホールド
-- 3本指以上は除外（通常の3F操作と干渉しないため）
+- 3F 以上は除外（通常の 3F 操作と干渉しないため）
 - ジェスチャー割り当ての変更は switch 文を編集するだけで可能
 
 ## Kconfig
@@ -143,7 +143,7 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 |------|------|------|
 | 状態管理方式 | ディスパッチテーブル + ジェスチャー別の継続条件 | ピンチはステートレス（毎フレーム導出）、プレス＆ホールドはステートフル（`hold_active` + `MAX == 2`） |
 | ジェスチャー割り当て | max=1 → ピンチ、max=2 → プレス＆ホールド、max=3 → 予約 | ディスパッチテーブル (`switch` 文) で管理。変更はコード編集のみ |
-| 移動量の算出 | セントロイドデルタ方式 | `frame->rel_x` ではなく、絶対座標からセントロイドのフレーム間差分を算出。通常の2Fスクロールと同じ方式で実績あり。指数によらず統一的に処理可能 |
+| 移動量の算出 | セントロイドデルタ方式 | `frame->rel_x` ではなく、絶対座標からセントロイドのフレーム間差分を算出。通常の 2F スクロールと同じ方式で実績あり。指数によらず統一的に処理可能 |
 | ピンチの合算方式 | central 集約 | peripheral は rel_x を EV_MSC で送信、central が合算・出力 |
 | ホールドのカーソル移動 | central 集約 | peripheral は rel_x/y を EV_MSC で送信、central がローカルのデルタと合算して REL_X/Y を出力 |
 | 符号反転方式 | LEFT 側を常に反転 (Kconfig) | 動的反転は誤動作のリスクあり |
@@ -157,11 +157,11 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | DT マクロ | `DT_INST(0, azoteq_iqs9151)` | 2引数形式の `DT_INST(inst, compat)` は Zephyr の正式マクロ。`DT_DRV_COMPAT` に依存しないため behavior ファイルからも使用可能 |
 | behavior_dev サイズ | 16 バイト | `"pdt"` は余裕で収まる |
 | peripheral の source ID | 2分割キーボードでは常に `source=0` | |
-| INVOKE_BEHAVIOR の state | 常に `state=true`、`param1` に finger_count | pressed/released の対称性の問題を回避 |
+| INVOKE_BEHAVIOR の state | 常に `state=true`、`param1` に fc | pressed/released の対称性の問題を回避 |
 | EV_MSC の識別 | 2段階フィルタ (proxy device + type/code) | 他のドライバと干渉しない |
 | MSC コード値 | `0x06`, `0x07`, `0x08` | 0x05 以下は Linux/Zephyr で使用済み。0x06 以上は未使用 |
 | set_peer_state でのリリース | peer 更新時にもジェスチャー終了を評価 | ローカル側のフレーム処理が走っていない場合でも確実にリリース |
-| 再タッチ時のジャンプ防止 | `cross_pad_centroid_valid = false` | finger_count 変化時、ジェスチャー開始/終了時に無効化 |
+| 再タッチ時のジャンプ防止 | `cross_pad_centroid_valid = false` | fc 変化時、ジェスチャー開始/終了時に無効化 |
 | ジェスチャー開始の安定化 | 50ms の安定化待ち (hold-tap 方式) | 両側タッチ検出後、fc が安定するまでフレームを飲み込む。過渡状態での誤ジェスチャー発動を防止。片側のみの操作には影響なし |
 
 ### 実機テスト結果
@@ -171,10 +171,10 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | EV_MSC の BLE 転送 | ✅ 動作確認済み。peripheral → central 方向で正常に転送される |
 | INVOKE_BEHAVIOR | ✅ 動作確認済み。central → peripheral 方向で `pdt` behavior が正常に呼ばれる |
 | ピンチの体感 | ✅ Apple Maps でズーム動作を確認。両側からの操作可能 |
-| プレス＆ホールド | ✅ ドラッグ操作を確認。1F側の再タッチでドラッグ継続 |
+| プレス＆ホールド | ✅ ドラッグ操作を確認。1F 側の再タッチでドラッグ継続 |
 | peer 側のカーソル移動 (ホールド) | ✅ peripheral の移動データが central に転送されカーソル移動に反映 |
 | ジェスチャー終了タイミング | ✅ 指を離した時点で即リリース（set_peer_state でのリリース追加後） |
-| 3本指の除外 | ✅ 3本指タッチ時に Ctrl / BTN_0 が送信されないことを確認 |
+| 3F の除外 | ✅ 3F タッチ時に Ctrl / BTN_0 が送信されないことを確認 |
 | GitHub Actions CI ビルド | ✅ 外部モジュールとして正常にビルド・動作確認済み |
 
 ### 未決定・将来検討
@@ -186,4 +186,4 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | `iqs9151_stable_finger_count` デバウンス | 初期実装では省略。不安定な場合に追加を検討 |
 | ジェスチャー割り当てのカスタマイズ | `iqs9151_cross_pad_resolve()` の switch 文で管理。Kconfig 化は不要と判断 |
 | `pdt` behavior 名 | `padtouch` への変更を試みたが不具合が発生。原因未調査。現状 `pdt` のまま |
-| トラックパッド端のセンシング不安定 | ハードウェア起因。端付近で finger_count が振動する。ドライバのセンシング処理で端座標を特別扱いする改善が考えられるが、影響範囲が大きいため将来課題 |
+| トラックパッド端のセンシング不安定 | ハードウェア起因。端付近で fc が振動する。ドライバのセンシング処理で端座標を特別扱いする改善が考えられるが、影響範囲が大きいため将来課題 |

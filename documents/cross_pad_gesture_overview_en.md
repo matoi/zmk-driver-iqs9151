@@ -17,11 +17,11 @@ distributed across two physically separate devices connected via BLE.
 
 | Left | Right | Gesture |
 |:----:|:-----:|---------|
-| 1 finger | 1 finger | **Pinch zoom** — move fingers apart/together horizontally to zoom in/out |
-| 1 finger | 2 fingers | **Press & hold** — left-click held + cursor movement (drag & drop) |
-| 2 fingers | 1 finger | **Press & hold** — same as above |
-| 2 fingers | 2 fingers | **Press & hold** — same as above |
-| 3 fingers | any | None (reserved for future use) |
+| 1F | 1F | **Pinch zoom** — move fingers apart/together horizontally to zoom in/out |
+| 1F | 2F | **Press & hold** — left-click held + cursor movement (drag & drop) |
+| 2F | 1F | **Press & hold** — same as above |
+| 2F | 2F | **Press & hold** — same as above |
+| 3F | any | None (reserved for future use) |
 
 Gesture assignment is controlled by a simple dispatch table (`iqs9151_cross_pad_resolve()`).
 Changing which gesture maps to which finger combination requires editing only a single
@@ -41,12 +41,12 @@ Changing which gesture maps to which finger combination requires editing only a 
 
 ### Bidirectional Touch State Notification
 
-Each side must know the other's finger count to resolve gestures:
+Each side must know the other's fc to resolve gestures:
 
 | Direction | Mechanism | Data |
 |-----------|-----------|------|
-| peripheral → central | `EV_MSC` input event via split transport | finger count, rel_x, rel_y |
-| central → peripheral | `INVOKE_BEHAVIOR("pdt")` via BLE | finger count |
+| peripheral → central | `EV_MSC` input event via split transport | fc, rel_x, rel_y |
+| central → peripheral | `INVOKE_BEHAVIOR("pdt")` via BLE | fc |
 
 No modifications to ZMK core are required — both `EV_MSC` forwarding and
 `INVOKE_BEHAVIOR` work with the existing split transport infrastructure.
@@ -106,7 +106,7 @@ Different gestures require different state management:
 when either side lifts all fingers.
 
 **Press & hold (stateful):** Once started, remains active as long as
-`MAX(local_fc, peer_fc) == 2`. The 1-finger side can be lifted and re-placed
+`MAX(local_fc, peer_fc) == 2`. The 1F side can be lifted and re-placed
 (to reposition for continued dragging) without ending the hold.
 
 ### Direct HID Report Manipulation
@@ -134,8 +134,8 @@ the pinch direction will also be affected. Set
 
 Both pinch and press & hold compute movement from **centroid deltas** (difference
 in finger position centroid between frames) rather than the hardware-reported
-`frame->rel_x`. This provides a unified approach regardless of finger count
-and matches the method already used by the driver's normal 2-finger scroll.
+`frame->rel_x`. This provides a unified approach regardless of fc
+and matches the method already used by the driver's normal 2F scroll.
 
 ### Central-Side Aggregation
 
@@ -157,7 +157,7 @@ the rest of the cross-pad logic stays in the driver because:
 - **HID report manipulation** (modifier/button press) is outside input-processor scope
 - The driver already decides `REL_X`/`REL_Y` vs. `REL_WHEEL` before emitting, so
   processors only see the final event type — consistent with how the driver handles
-  normal 2-finger scroll
+  normal 2F scroll
 
 An alternative "central-side aggregation" model (peripheral sends raw data,
 central converts based on gesture state) was also considered but rejected:
