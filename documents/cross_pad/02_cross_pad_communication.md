@@ -45,6 +45,31 @@ t3: 左パッドから指を離す
 ZMK split keyboard の通信は本質的に非対称であり、
 方向ごとに異なる仕組みを使い分ける。
 
+### 通信方式の選定理由
+
+本機能は ZMK の外部モジュールとして実装されており、**ZMK コアを改造しない**という制約がある。
+この制約下で、双方向の通信に利用できる既存の仕組みを調査した結果、
+各方向について事実上選択肢が一つしかないことがわかった。
+
+**peripheral → central:**
+
+| 候補 | 評価 |
+|------|------|
+| `EV_MSC` input event | ✅ **採用**。split transport がそのまま転送する。`input_listener.c` は `EV_MSC` を処理しないため、他のサブシステムに干渉しない。カスタムコードで任意データを送れる |
+| `EV_REL` / `EV_KEY` | ❌ input listener が通常のカーソル移動やキー押下として処理してしまう。カスタムデータとして区別できない |
+| カスタム BLE サービス / Zephyr メッセージ | ❌ ZMK コアの改造が必要 |
+| sensor channel | ❌ エンコーダ等の用途向けの設計で、任意のリアルタイムデータ転送には不向き |
+
+**central → peripheral:**
+
+| 候補 | 評価 |
+|------|------|
+| `INVOKE_BEHAVIOR` | ✅ **採用**。ZMK の split アーキテクチャで central → peripheral にデータを送れる唯一の既存手段。behavior のパラメータ (`param1`) に fc を載せる |
+| カスタム BLE characteristic | ❌ ZMK コアの改造が必要 |
+| 設定 / config 同期 | ❌ リアルタイムデータの転送向けではない |
+
+結論として、ZMK コア無改造という制約下では、両方向とも他に実用的な選択肢が存在しない。
+
 ## peripheral → central: EV_MSC による input event
 
 peripheral 側のドライバが fc 変化時に EV_MSC イベントを送出する。
