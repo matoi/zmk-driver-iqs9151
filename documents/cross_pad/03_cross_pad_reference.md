@@ -99,6 +99,10 @@ config INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER
     range 0 2
     default 1
 
+config INPUT_IQS9151_CROSS_PAD_PINCH_INVERT
+    bool "Invert cross-pad pinch wheel direction"
+    default n
+
 endif # INPUT_IQS9151_CROSS_PAD
 ```
 
@@ -133,6 +137,9 @@ Kconfig の choice からコンパイル時に符号反転方向を決定する:
 void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count);
 void iqs9151_set_peer_rel_x(const struct device *dev, int16_t rel_x);
 void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
+
+/* include/zmk/cross_pad_gate.h */
+void zmk_cross_pad_gate_set(bool active);
 ```
 
 ## 設計判断一覧
@@ -153,6 +160,10 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | 修飾キー/ボタン送信 | HID レポート直接操作 | `zmk_hid_register_mod()` / `zmk_hid_mouse_button_press()` を直接呼び出し。キーマップに依存しない |
 | ピンチの修飾キー | `CROSS_PAD_PINCH_MODIFIER` で選択 (0=None, 1=LCtrl, 2=MB4) | 単一の int 設定値。choice ブロックではなく int 型にして簡潔に |
 | ホールドのボタン | BTN_0 (左クリック) 固定 | `zmk_hid_mouse_button_press(0)` で直接操作 |
+| ピンチ方向反転 | `CROSS_PAD_PINCH_INVERT` (bool) | ピンチの REL_WHEEL はユーザーの input-processor チェイン（scroll scaler 等）を通るため、`zip_scroll_transform` による方向反転の影響を受ける。ピンチ方向を通常スクロール方向とは独立して制御するために、ドライバ内で符号反転する設定を追加 |
+| cross-pad-gate input processor | ジェスチャー中に peripheral proxy の REL を抑制 | クロスパッド開始時、BLE ラウンドトリップの間 peripheral は通常処理を継続するため、REL が漏れる。central の peripheral proxy listener の先頭に gate を挿入し、`ZMK_INPUT_PROC_STOP` で抑制 |
+| peer rel データの蓄積 | `+=` で累積 | `=` による上書きだと、BLE 接続間隔内に複数フレームが到着した場合にデータが失われる |
+| flush_peer による即時処理 | MSC 到着時に即座に REL を emit | ローカルフレーム待ちを解消し、peripheral 側の操作レスポンスを改善 |
 | グレースピリオド | 削除済み | 当初200msの抑制を実装したが、通常2Fスクロールの体感を悪化させたため削除。`cleanup_normal` による遷移時リセットで十分 |
 | DT マクロ | `DT_INST(0, azoteq_iqs9151)` | 2引数形式の `DT_INST(inst, compat)` は Zephyr の正式マクロ。`DT_DRV_COMPAT` に依存しないため behavior ファイルからも使用可能 |
 | behavior_dev サイズ | 16 バイト | `"pdt"` は余裕で収まる |
@@ -175,6 +186,9 @@ void iqs9151_set_peer_rel_y(const struct device *dev, int16_t rel_y);
 | peer 側のカーソル移動 (ホールド) | ✅ peripheral の移動データが central に転送されカーソル移動に反映 |
 | ジェスチャー終了タイミング | ✅ 指を離した時点で即リリース（set_peer_state でのリリース追加後） |
 | 3F の除外 | ✅ 3F タッチ時に Ctrl / BTN_0 が送信されないことを確認 |
+| cross-pad-gate | ✅ ジェスチャー開始時の REL 漏れが抑制されることを確認 |
+| peer rel 累積 + flush_peer | ✅ peripheral 側の操作レスポンスが改善されることを確認 |
+| ピンチ方向反転 (PINCH_INVERT) | ✅ scroll transform の有無に関わらず正しいズーム方向を確認 |
 | GitHub Actions CI ビルド | ✅ 外部モジュールとして正常にビルド・動作確認済み |
 
 ### 未決定・将来検討
