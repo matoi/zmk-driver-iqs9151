@@ -4,7 +4,7 @@
 
 データ構造、Kconfig、設計判断の一覧。
 
-[メイン設計ドキュメント](cross_pad_gesture_design.md) に戻る。
+[メイン設計ドキュメント](00_cross_pad_design.md) に戻る。
 
 ## データ構造
 

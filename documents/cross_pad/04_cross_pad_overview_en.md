@@ -353,7 +353,7 @@ impact usability in practice.
 
 ## Related Documents (Japanese)
 
-- [設計ドキュメント](cross_pad_gesture_design.md) — Full design document
-- [実装設計](cross_pad_gesture_implementation.md) — Implementation details
-- [通信設計](cross_pad_communication.md) — Communication design
-- [リファレンス](cross_pad_reference.md) — Data structures, Kconfig, design decisions
+- [設計ドキュメント](00_cross_pad_design.md) — Full design document
+- [実装設計](01_cross_pad_implementation.md) — Implementation details
+- [通信設計](02_cross_pad_communication.md) — Communication design
+- [リファレンス](03_cross_pad_reference.md) — Data structures, Kconfig, design decisions

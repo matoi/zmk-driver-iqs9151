@@ -23,9 +23,9 @@
 | **flush** | セントラル側でペリフェラルから受信した移動データを即座に処理すること |
 
 **関連ドキュメント:**
-- [通信設計](cross_pad_communication.md) — EV_MSC, INVOKE_BEHAVIOR, split transport の詳細
-- [実装設計](cross_pad_gesture_implementation.md) — ピンチ・プレス＆ホールドの詳細設計
-- [リファレンス](cross_pad_reference.md) — データ構造、Kconfig、設計判断一覧
+- [通信設計](02_cross_pad_communication.md) — EV_MSC, INVOKE_BEHAVIOR, split transport の詳細
+- [実装設計](01_cross_pad_implementation.md) — ピンチ・プレス＆ホールドの詳細設計
+- [リファレンス](03_cross_pad_reference.md) — データ構造、Kconfig、設計判断一覧
 
 ## 前提条件
 
@@ -312,6 +312,8 @@ BLE 通信の本質的な特性であり、gate の対象外。
 | ZMK レイヤー切り替えで processor チェインを変更 | レイヤー活性化の副作用、複雑性 |
 
 ## アーキテクチャの代替案の検討
+
+> 本セクションで使用する用語（1F/2F, fc, local/peer 等）は [用語定義](#用語定義) を参照。
 
 現在の構成（ドライバ内で全ジェスチャー処理を完結）が最適かどうか、
 以下の代替案を検討した。結論として、現在の構成が最もシンプル。

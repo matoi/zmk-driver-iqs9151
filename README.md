@@ -7,8 +7,8 @@
 Cooperative gestures between two trackpads on a split keyboard — pinch zoom and drag & drop.
 This is an independent PoC extension, developed in a separate repository.
 
-- 📄 **[Setup & Design overview (English)](https://github.com/matoi/zmk-driver-iqs9151/blob/feature/cross-pad-gesture/documents/cross_pad_gesture_overview_en.md)**
-- 📄 **[設計ドキュメント (日本語)](https://github.com/matoi/zmk-driver-iqs9151/blob/feature/cross-pad-gesture/documents/cross_pad_gesture_design.md)**
+- 📄 **[Setup & Design overview (English)](https://github.com/matoi/zmk-driver-iqs9151/blob/feature/cross-pad-gesture/documents/cross_pad/04_cross_pad_overview_en.md)**
+- 📄 **[設計ドキュメント (日本語)](https://github.com/matoi/zmk-driver-iqs9151/blob/feature/cross-pad-gesture/documents/cross_pad/00_cross_pad_design.md)**
 - 🔀 **[feature/cross-pad-gesture ブランチ](https://github.com/matoi/zmk-driver-iqs9151/tree/feature/cross-pad-gesture)**
 - 📋 **[設定例リポジトリ](https://github.com/matoi/zmk-config-LalaPadGen2-cross-pad-gesture-example)**
 
@@ -142,7 +142,7 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 
 左右分割キーボードの両側にトラックパッドがある構成で、両側を同時にタッチすることで特殊ジェスチャーを実行する機能です。
 
-📄 **[English documentation (Setup & Design overview)](documents/cross_pad_gesture_overview_en.md)**
+📄 **[English documentation (Setup & Design overview)](documents/cross_pad/04_cross_pad_overview_en.md)**
 
 ### 使えるジェスチャー
 
