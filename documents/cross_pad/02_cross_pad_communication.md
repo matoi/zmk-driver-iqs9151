@@ -254,4 +254,18 @@ central 側                                peripheral 側
 #define INPUT_MSC_CROSS_PAD_REL_Y  0x08
 ```
 
-0x05 以下は Linux/Zephyr で使用済み。0x06 以上は未使用。
+**現状:** Linux の `input-event-codes.h` では `MSC_TIMESTAMP` (0x05) までが定義済み。
+0x06 以降は未割り当てであり、本機能はこの未使用領域を独自に利用している。
+
+**⚠️ 衝突リスク:**
+これらのコード値は非公式な独自割り当てであり、将来 Linux upstream や Zephyr で
+同じ値が別の用途に割り当てられた場合、衝突が発生する可能性がある。
+ZMK コア無改造という制約上、公式なコード割り当てを得る手段はない。
+
+**緩和策:**
+- Zephyr/ZMK が `input-event-codes.h` を更新した場合、本モジュールのコード値を
+  その時点の未使用領域に移動する必要がある
+- コード値は `include/input-event-extra-codes.h` に一元定義しているため、
+  変更時の影響範囲は限定的
+- 現実的には、MSC コードが頻繁に追加されることは稀であり、
+  短〜中期的なリスクは低い
