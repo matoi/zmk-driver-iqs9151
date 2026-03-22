@@ -106,6 +106,8 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define INPUT_MSC_CROSS_PAD_REL_Y  0x12
 #define CROSS_PAD_PINCH_WHEEL_DIV 12
 #define CROSS_PAD_STABILIZE_MS 50 /* wait for finger_count to stabilize before starting gesture */
+#define CROSS_PAD_NOTIFY_RETRY_COUNT 2    /* number of extra fc=0 retransmissions */
+#define CROSS_PAD_NOTIFY_RETRY_MS   30    /* interval between retransmissions */
 #define CROSS_PAD_PINCH_WHEEL_GAIN_X10 CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10
 #define CROSS_PAD_PINCH_WHEEL_GAIN_DEN 10
 #if defined(CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT)
@@ -280,6 +282,9 @@ struct iqs9151_data {
     int64_t cross_pad_undecided_ts; /* 0 = not undecided; >0 = timestamp when undecided started */
     uint8_t cross_pad_undecided_local_fc; /* fc snapshot when undecided started */
     uint8_t cross_pad_undecided_peer_fc;  /* peer fc snapshot when undecided started */
+    struct k_work_delayable cross_pad_notify_retry_work;
+    uint8_t cross_pad_notify_retry_fc;    /* fc value to re-send */
+    uint8_t cross_pad_notify_retry_remaining; /* retries left */
 #endif
 };
 
@@ -1934,23 +1939,13 @@ static void iqs9151_cross_pad_cleanup_normal(struct iqs9151_data *data) {
 }
 
 /*
- * Touch notification: inform the peer side of our finger_count change.
- * Peripheral uses input_report (captured by split handler and forwarded).
- * Central uses zmk_split_central_invoke_behavior (pad_touch behavior).
+ * Send a single fc notification to the peer.
  */
-static void iqs9151_cross_pad_notify_touch(struct iqs9151_data *data,
-                                            const struct iqs9151_frame *frame) {
-    if (frame->finger_count == data->prev_frame.finger_count) {
-        return;
-    }
-
-    /* Finger count changed — invalidate centroid to avoid jump on re-touch */
-    data->cross_pad_centroid_valid = false;
-
+static void iqs9151_cross_pad_send_fc(struct iqs9151_data *data, uint8_t fc) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     struct zmk_behavior_binding binding = {
         .behavior_dev = "pdt",
-        .param1 = frame->finger_count,
+        .param1 = fc,
         .param2 = 0,
     };
     struct zmk_behavior_binding_event event = {
@@ -1960,8 +1955,58 @@ static void iqs9151_cross_pad_notify_touch(struct iqs9151_data *data,
     zmk_split_central_invoke_behavior(0, &binding, event, true);
 #elif IS_ENABLED(CONFIG_ZMK_SPLIT)
     input_report(data->dev, INPUT_EV_MSC, INPUT_MSC_CROSS_PAD_TOUCH,
-                 frame->finger_count, true, K_NO_WAIT);
+                 fc, true, K_NO_WAIT);
 #endif
+}
+
+/*
+ * Retry work callback: re-send fc=0 notification to mitigate BLE loss.
+ */
+static void iqs9151_cross_pad_notify_retry_work_cb(struct k_work *work) {
+    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct iqs9151_data *data =
+        CONTAINER_OF(dwork, struct iqs9151_data, cross_pad_notify_retry_work);
+
+    if (data->cross_pad_notify_retry_remaining == 0U) {
+        return;
+    }
+
+    iqs9151_cross_pad_send_fc(data, data->cross_pad_notify_retry_fc);
+    data->cross_pad_notify_retry_remaining--;
+    LOG_DBG("cross-pad notify retry: fc=%d remaining=%d",
+            data->cross_pad_notify_retry_fc,
+            data->cross_pad_notify_retry_remaining);
+
+    if (data->cross_pad_notify_retry_remaining > 0U) {
+        k_work_schedule(&data->cross_pad_notify_retry_work,
+                        K_MSEC(CROSS_PAD_NOTIFY_RETRY_MS));
+    }
+}
+
+/*
+ * Touch notification: inform the peer side of our finger_count change.
+ * When fc goes to 0, schedule retransmissions to mitigate BLE loss.
+ */
+static void iqs9151_cross_pad_notify_touch(struct iqs9151_data *data,
+                                            const struct iqs9151_frame *frame) {
+    if (frame->finger_count == data->prev_frame.finger_count) {
+        return;
+    }
+
+    /* Finger count changed — cancel any pending retries and invalidate centroid */
+    k_work_cancel_delayable(&data->cross_pad_notify_retry_work);
+    data->cross_pad_notify_retry_remaining = 0;
+    data->cross_pad_centroid_valid = false;
+
+    iqs9151_cross_pad_send_fc(data, frame->finger_count);
+
+    /* Schedule retries for fc=0 to mitigate BLE notification loss */
+    if (frame->finger_count == 0U) {
+        data->cross_pad_notify_retry_fc = 0;
+        data->cross_pad_notify_retry_remaining = CROSS_PAD_NOTIFY_RETRY_COUNT;
+        k_work_schedule(&data->cross_pad_notify_retry_work,
+                        K_MSEC(CROSS_PAD_NOTIFY_RETRY_MS));
+    }
     LOG_DBG("cross-pad notify touch: fc=%d", frame->finger_count);
 }
 
@@ -3255,6 +3300,10 @@ static int iqs9151_init(const struct device *dev) {
     k_work_init_delayable(&data->three_finger_click_work, iqs9151_three_finger_click_work_cb);
     k_work_init_delayable(&data->inertia_scroll_work, iqs9151_inertia_scroll_work_cb);
     k_work_init_delayable(&data->inertia_cursor_work, iqs9151_inertia_cursor_work_cb);
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+    k_work_init_delayable(&data->cross_pad_notify_retry_work,
+                          iqs9151_cross_pad_notify_retry_work_cb);
+#endif
     iqs9151_inertia_state_reset(&data->inertia_scroll);
     iqs9151_inertia_state_reset(&data->inertia_cursor);
     iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
@@ -3313,6 +3362,10 @@ void iqs9151_test_context_init(void *ctx, const struct device *dev) {
     k_work_init_delayable(&data->three_finger_click_work, iqs9151_three_finger_click_work_cb);
     k_work_init_delayable(&data->inertia_scroll_work, iqs9151_inertia_scroll_work_cb);
     k_work_init_delayable(&data->inertia_cursor_work, iqs9151_inertia_cursor_work_cb);
+#ifdef CONFIG_INPUT_IQS9151_CROSS_PAD
+    k_work_init_delayable(&data->cross_pad_notify_retry_work,
+                          iqs9151_cross_pad_notify_retry_work_cb);
+#endif
     iqs9151_inertia_state_reset(&data->inertia_scroll);
     iqs9151_inertia_state_reset(&data->inertia_cursor);
     iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
