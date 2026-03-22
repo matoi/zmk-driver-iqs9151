@@ -123,9 +123,9 @@ Kconfig の choice からコンパイル時に符号反転方向を決定する:
 ## 定数定義
 
 ```c
-#define INPUT_MSC_CROSS_PAD_TOUCH  0x06  /* finger_count の通知 */
-#define INPUT_MSC_CROSS_PAD_SPREAD 0x07  /* ピンチ/ホールド中の rel_x 通知 */
-#define INPUT_MSC_CROSS_PAD_REL_Y  0x08  /* ホールド中の rel_y 通知 */
+#define INPUT_MSC_CROSS_PAD_TOUCH  0x10  /* finger_count の通知 */
+#define INPUT_MSC_CROSS_PAD_SPREAD 0x11  /* ピンチ/ホールド中の rel_x 通知 */
+#define INPUT_MSC_CROSS_PAD_REL_Y  0x12  /* ホールド中の rel_y 通知 */
 #define CROSS_PAD_PINCH_WHEEL_DIV  12
 #define CROSS_PAD_STABILIZE_MS     50  /* 安定化待ち時間 */
 ```
@@ -170,7 +170,7 @@ void zmk_cross_pad_gate_set(bool active);
 | peripheral の source ID | 2分割キーボードでは常に `source=0` | |
 | INVOKE_BEHAVIOR の state | 常に `state=true`、`param1` に fc | pressed/released の対称性の問題を回避 |
 | EV_MSC の識別 | 2段階フィルタ (proxy device + type/code) | 他のドライバと干渉しない |
-| MSC コード値 | `0x06`, `0x07`, `0x08` | 0x05 以下は Linux/Zephyr で使用済み。0x06 以上は未使用 |
+| MSC コード値 | `0x10`, `0x11`, `0x12` | 0x05 以下は Linux/Zephyr で使用済み。0x10 台を使用し upstream 拡張との衝突を回避 |
 | set_peer_state でのリリース | peer 更新時にもジェスチャー終了を評価 | ローカル側のフレーム処理が走っていない場合でも確実にリリース |
 | 再タッチ時のジャンプ防止 | `cross_pad_centroid_valid = false` | fc 変化時、ジェスチャー開始/終了時に無効化 |
 | ジェスチャー開始の安定化 | 50ms の安定化待ち (hold-tap 方式) | 両側タッチ検出後、fc が安定するまでフレームを飲み込む。過渡状態での誤ジェスチャー発動を防止。片側のみの操作には影響なし |

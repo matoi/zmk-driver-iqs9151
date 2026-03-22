@@ -249,21 +249,24 @@ central 側                                peripheral 側
 ### MSC コード値
 
 ```c
-#define INPUT_MSC_CROSS_PAD_TOUCH  0x06
-#define INPUT_MSC_CROSS_PAD_SPREAD 0x07
-#define INPUT_MSC_CROSS_PAD_REL_Y  0x08
+#define INPUT_MSC_CROSS_PAD_TOUCH  0x10
+#define INPUT_MSC_CROSS_PAD_SPREAD 0x11
+#define INPUT_MSC_CROSS_PAD_REL_Y  0x12
 ```
 
-**現状:** Linux の `input-event-codes.h` では `MSC_TIMESTAMP` (0x05) までが定義済み。
-0x06 以降は未割り当てであり、本機能はこの未使用領域を独自に利用している。
+**現状:** Zephyr の `input-event-codes.h` では `INPUT_MSC_SCAN` (0x04) のみが定義済み。
+Zephyr は Linux の `input-event-codes.h` を参考にしているが、定義は独立している
+（Linux では 0x05 まで使用済みだが Zephyr には存在しない）。
+0x10 台を使用することで、Zephyr が将来 Linux に合わせてコードを追加しても
+当面衝突しないようにしている。
 
 **⚠️ 衝突リスク:**
-これらのコード値は非公式な独自割り当てであり、将来 Linux upstream や Zephyr で
+これらのコード値は非公式な独自割り当てであり、将来 Zephyr upstream で
 同じ値が別の用途に割り当てられた場合、衝突が発生する可能性がある。
 ZMK コア無改造という制約上、公式なコード割り当てを得る手段はない。
 
 **緩和策:**
-- Zephyr/ZMK が `input-event-codes.h` を更新した場合、本モジュールのコード値を
+- Zephyr が `input-event-codes.h` を更新した場合、本モジュールのコード値を
   その時点の未使用領域に移動する必要がある
 - コード値は `include/input-event-extra-codes.h` に一元定義しているため、
   変更時の影響範囲は限定的
