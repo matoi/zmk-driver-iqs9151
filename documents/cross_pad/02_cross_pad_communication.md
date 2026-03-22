@@ -117,6 +117,12 @@ if (rel_y != 0) {
 }
 ```
 
+スワイプ中は `MSC_CROSS_PAD_SPREAD` で rel_x を送信（Y は不使用）:
+```c
+input_report(data->dev, INPUT_EV_MSC, INPUT_MSC_CROSS_PAD_SPREAD,
+             dx, true, K_NO_WAIT);
+```
+
 ### central 側の受信
 
 ```c

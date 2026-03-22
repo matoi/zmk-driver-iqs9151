@@ -30,6 +30,12 @@ struct iqs9151_data {
     int64_t cross_pad_undecided_ts;       /* 0=確定済み; >0=安定化待ち開始時刻 */
     uint8_t cross_pad_undecided_local_fc; /* 安定化待ち中の local fc スナップショット */
     uint8_t cross_pad_undecided_peer_fc;  /* 安定化待ち中の peer fc スナップショット */
+    bool cross_pad_swipe_active;          /* スワイプジェスチャーがアクティブか */
+    bool cross_pad_swipe_fired;           /* スワイプキーストロークが発火済みか (ロック) */
+    int32_t cross_pad_swipe_accum;        /* スワイプ蓄積 X デルタ */
+    uint8_t cross_pad_swipe_prev_local_fc;/* ロックリセット用: 前回の local fc */
+    uint8_t cross_pad_swipe_prev_peer_fc; /* ロックリセット用: 前回の peer fc */
+    int64_t cross_pad_swipe_cooldown_until;/* ロックリセット後のクールタイム終了時刻 */
 #endif
 };
 ```
@@ -49,6 +55,7 @@ enum cross_pad_gesture {
     CROSS_PAD_GESTURE_NONE = 0,
     CROSS_PAD_GESTURE_PINCH,
     CROSS_PAD_GESTURE_PRESS_HOLD,
+    CROSS_PAD_GESTURE_SWIPE,
 };
 
 static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
@@ -59,14 +66,13 @@ static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
     switch (MAX(local_fc, peer_fc)) {
     case 1:  return CROSS_PAD_GESTURE_PINCH;       /* both 1F → pinch */
     case 2:  return CROSS_PAD_GESTURE_PRESS_HOLD;  /* either 2F → press & hold */
-    case 3:  return CROSS_PAD_GESTURE_NONE;         /* either 3F → reserved */
+    case 3:  return CROSS_PAD_GESTURE_SWIPE;        /* either 3F → swipe */
     default: return CROSS_PAD_GESTURE_NONE;
     }
 }
 ```
 
-- 両側にタッチがあり、`MAX == 1` → ピンチ、`MAX == 2` → プレス＆ホールド
-- 3F 以上は除外（通常の 3F 操作と干渉しないため）
+- 両側にタッチがあり、`MAX == 1` → ピンチ、`MAX == 2` → プレス＆ホールド、`MAX == 3` → スワイプ
 - ジェスチャー割り当ての変更は switch 文を編集するだけで可能
 
 ## Kconfig
@@ -103,6 +109,16 @@ config INPUT_IQS9151_CROSS_PAD_PINCH_INVERT
     bool "Invert cross-pad pinch wheel direction"
     default n
 
+config INPUT_IQS9151_CROSS_PAD_SWIPE_PRESET
+    int "Cross-pad swipe keystroke preset (0=macOS browser, 1=Windows browser, 2=macOS workspace)"
+    range 0 2
+    default 0
+
+config INPUT_IQS9151_CROSS_PAD_SWIPE_THRESHOLD
+    int "Cross-pad swipe threshold (centroid delta pixels)"
+    range 10 500
+    default 80
+
 endif # INPUT_IQS9151_CROSS_PAD
 ```
 
@@ -128,6 +144,8 @@ Kconfig の choice からコンパイル時に符号反転方向を決定する:
 #define INPUT_MSC_CROSS_PAD_REL_Y  0x12  /* ホールド中の rel_y 通知 */
 #define CROSS_PAD_PINCH_WHEEL_DIV  12
 #define CROSS_PAD_STABILIZE_MS     50  /* 安定化待ち時間 */
+#define CROSS_PAD_SWIPE_THRESHOLD  CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_THRESHOLD
+#define CROSS_PAD_SWIPE_COOLDOWN_MS 100  /* ロックリセット後のクールタイム (ms) */
 ```
 
 ## 公開 API
@@ -174,6 +192,11 @@ void zmk_cross_pad_gate_set(bool active);
 | set_peer_state でのリリース | peer 更新時にもジェスチャー終了を評価 | ローカル側のフレーム処理が走っていない場合でも確実にリリース |
 | 再タッチ時のジャンプ防止 | `cross_pad_centroid_valid = false` | fc 変化時、ジェスチャー開始/終了時に無効化 |
 | ジェスチャー開始の安定化 | 50ms の安定化待ち (hold-tap 方式) | 両側タッチ検出後、fc が安定するまでフレームを飲み込む。過渡状態での誤ジェスチャー発動を防止。片側のみの操作には影響なし |
+| 3F スワイプのジェスチャー割り当て | max=3 → SWIPE | ディスパッチテーブルに追加。3F の片側以上でスワイプ |
+| スワイプのキー送信 | `zmk_hid_implicit_modifiers_press` + `zmk_hid_keyboard_press` | implicit modifiers でユーザーの押下中キーと干渉しない |
+| スワイプのプリセット方式 | Kconfig int でプリセット番号を指定 | キーコードの直接指定は設定が煩雑。プリセット方式でよく使う組み合わせを簡単に選べる |
+| スワイプのロック機構 | 発火後 `swipe_fired = true`、片側 fc=0 でリセット | 一回のスワイプで一回だけ発火。3F 継続中に指を離して戻すと再発火可能 |
+| スワイプのロックリセット後クールタイム | 100ms のクールタイム + peer_rel クリア | ロックリセット時に残留するペリフェラルの蓄積データが即座に再発火を引き起こすのを防止 |
 
 ### 実機テスト結果
 
@@ -189,6 +212,8 @@ void zmk_cross_pad_gate_set(bool active);
 | cross-pad-gate | ✅ ジェスチャー開始時の REL 漏れが抑制されることを確認 |
 | peer rel 累積 + flush_peer | ✅ peripheral 側の操作レスポンスが改善されることを確認 |
 | ピンチ方向反転 (PINCH_INVERT) | ✅ scroll transform の有無に関わらず正しいズーム方向を確認 |
+| 3F スワイプ | ✅ macOS ブラウザの進む/戻る動作を確認。両側からの操作可能 |
+| スワイプ多重発火対策 | ✅ クールタイム導入後、改善を確認（経過観察中） |
 | GitHub Actions CI ビルド | ✅ 外部モジュールとして正常にビルド・動作確認済み |
 
 ### 未決定・将来検討
@@ -196,7 +221,6 @@ void zmk_cross_pad_gate_set(bool active);
 | 項目 | 状態 |
 |------|------|
 | 回転ジェスチャー (ROTATE) | 実現方法の調査が必要 |
-| max=3 の割り当て | 未定（現在は NONE） |
 | `iqs9151_stable_finger_count` デバウンス | 初期実装では省略。不安定な場合に追加を検討 |
 | ジェスチャー割り当てのカスタマイズ | `iqs9151_cross_pad_resolve()` の switch 文で管理。Kconfig 化は不要と判断 |
 | `pdt` behavior 名 | `padtouch` への変更を試みたが不具合が発生。原因未調査。現状 `pdt` のまま |

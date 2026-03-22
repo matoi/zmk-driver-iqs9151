@@ -2,9 +2,9 @@
 
 ## クロスパッドジェスチャー (Cross-Pad Gesture)
 
-左右分割キーボードの両側のトラックパッドを同時にタッチすることで、ピンチズームやドラッグ＆ドロップなどの特殊ジェスチャーを実行する機能です。独自拡張の PoC として、本家とは別のリポジトリで開発中です。
+左右分割キーボードの両側のトラックパッドを同時にタッチすることで、ピンチズームやドラッグ＆ドロップ、ブラウザの進む/戻るなどの特殊ジェスチャーを実行する機能です。独自拡張の PoC として、本家とは別のリポジトリで開発中です。
 
-Cooperative gestures between two trackpads on a split keyboard — pinch zoom and drag & drop.
+Cooperative gestures between two trackpads on a split keyboard — pinch zoom, drag & drop, and browser back/forward.
 This is an independent PoC extension, developed in a separate repository.
 
 - 📄 **[Setup & Design overview (English)](https://github.com/matoi/zmk-driver-iqs9151/blob/feature/cross-pad-gesture/documents/cross_pad/04_cross_pad_overview_en.md)**
@@ -31,7 +31,7 @@ This is an independent PoC extension, developed in a separate repository.
 - 滑らかな慣性カーソル/スクロール対応
 - ZMKのキーマップ連携（レイヤーごとに動作の割り当て可能）
 - カーソルやスクロールの速度をリアルタイムに調整可能（電源OFFで設定が消えない）
-- **クロスパッドジェスチャー**: 左右分割キーボードで両側のトラックパッドを同時に使い、ピンチズームやドラッグ&ドロップが可能
+- **クロスパッドジェスチャー**: 左右分割キーボードで両側のトラックパッドを同時に使い、ピンチズームやドラッグ&ドロップ、ブラウザの進む/戻りが可能
 
 
 ## クイックスタート
@@ -146,12 +146,13 @@ CONFIG_INPUT_IQS9151_LOG_LEVEL=3
 
 ### 使えるジェスチャー
 
-| 左 | 右 | 動作 |
-|:--:|:--:|------|
-| 1本指 | 1本指 | **ピンチイン・アウト** — 指を横方向に外側/内側に動かしてズーム |
-| 1本指 | 2本指 | **プレス＆ホールド** — 左クリックを押しながらカーソル移動（ドラッグ＆ドロップ） |
-| 2本指 | 1本指 | **プレス＆ホールド** — 同上 |
-| 2本指 | 2本指 | **プレス＆ホールド** — 同上 |
+両側に1本以上の指がある場合、左右の指の本数の最大値でジェスチャーが決まります:
+
+| 最大指数 | 動作 |
+|:---:|------|
+| 1 | **ピンチイン・アウト** — 指を横方向に外側/内側に動かしてズーム |
+| 2 | **プレス＆ホールド** — 左クリックを押しながらカーソル移動（ドラッグ＆ドロップ） |
+| 3 | **3F スワイプ** — 水平にスワイプしてブラウザの進む/戻る等のキーストロークを送信 |
 
 ※ジェスチャーの割り当ては `iqs9151_cross_pad_resolve()` の switch 文を編集することで変更可能です。
 
@@ -210,6 +211,8 @@ central 側の overlay で、peripheral のトラックパッドを `cross-pad-p
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | ピンチのホイール出力ゲイン (10=1.0倍, 40=4.0倍, 80=8.0倍) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | ピンチ時の修飾キー (0=なし, 1=Left Ctrl, 2=Mouse Button 4) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT` | bool | `n` | ピンチの wheel 方向を反転 |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_PRESET` | int | `0` | スワイプのキーストロークプリセット (0=macOSブラウザ, 1=Windowsブラウザ, 2=macOSワークスペース) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_THRESHOLD` | int | `80` | スワイプ発火に必要な移動量 (ピクセル) |
 
 **修飾キーの選択について:**
 - `1` (Left Ctrl): ほとんどのOSで Ctrl+Wheel ズームとして動作します（デフォルト）

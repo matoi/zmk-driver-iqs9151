@@ -76,6 +76,9 @@
 - **ピンチ**: ステートレス。毎フレーム `resolve()` で判定。どちらかの fc が 0 になると即終了
 - **プレス＆ホールド**: ステートフル。`resolve()` で開始後、`MAX(local_fc, peer_fc) == 2`
   が維持される限り継続。1F 側が離れてもホールドが継続する
+- **スワイプ**: ステートフル。`resolve()` で開始後、`MAX(local_fc, peer_fc) == 3`
+  が維持される限り継続。一度ショートカットが発火すると、片側の fc が一度 0 に落ちるまで
+  再発火しない（ロック機構）
 
 **ジェスチャー判定関数 (ディスパッチテーブル):**
 ```c
@@ -83,6 +86,7 @@ enum cross_pad_gesture {
     CROSS_PAD_GESTURE_NONE = 0,
     CROSS_PAD_GESTURE_PINCH,
     CROSS_PAD_GESTURE_PRESS_HOLD,
+    CROSS_PAD_GESTURE_SWIPE,
 };
 
 static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
@@ -93,7 +97,7 @@ static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
     switch (MAX(local_fc, peer_fc)) {
     case 1:  return CROSS_PAD_GESTURE_PINCH;       /* both 1F → pinch */
     case 2:  return CROSS_PAD_GESTURE_PRESS_HOLD;  /* either 2F → press & hold */
-    case 3:  return CROSS_PAD_GESTURE_NONE;         /* either 3F → reserved */
+    case 3:  return CROSS_PAD_GESTURE_SWIPE;        /* either 3F → swipe */
     default: return CROSS_PAD_GESTURE_NONE;
     }
 }
@@ -114,6 +118,11 @@ Kconfig での設定変更は不要。
 - `hold_now = true` かつ `hold_active = false` → **開始**: BTN_0 press, cleanup
 - `hold_now = false` かつ `hold_active = true` → **終了**: BTN_0 release
 - `hold_now = true` かつ `hold_active = true` → **継続**: カーソル移動
+
+スワイプ: `cross_pad_swipe_active` フラグで検出
+- `swipe_now = true` かつ `swipe_active = false` → **開始**: 状態初期化
+- `swipe_now = false` かつ `swipe_active = true` → **終了**: 状態クリア
+- `swipe_now = true` かつ `swipe_active = true` → **継続**: セントロイドデルタ X を蓄積し、閾値超えでショートカット発火
 
 **プレス＆ホールドの `hold_now` の決定**:
 ```c
@@ -142,26 +151,13 @@ const bool hold_now = hold_now_resolve || hold_continuing;
 `iqs9151_cross_pad_resolve()` の switch 文により、`MAX(local_fc, peer_fc)` の値ごとに
 ジェスチャーが割り当てられる:
 
-| 左 fc | 右 fc | max | ジェスチャー |
-|:-----:|:-----:|:---:|------------|
-| 1 | 1 | 1 | ピンチイン・アウト (ズーム) |
-| 1 | 2 | 2 | プレス＆ホールド (ドラッグ) |
-| 2 | 1 | 2 | プレス＆ホールド (ドラッグ) |
-| 2 | 2 | 2 | プレス＆ホールド (ドラッグ) |
-| 1 | 3 | 3 | なし（予約: 将来ジェスチャー用） |
-| 3 | 1 | 3 | なし（予約: 将来ジェスチャー用） |
-| 3 | 3 | 3 | なし（予約: 将来ジェスチャー用） |
+| MAX(左fc, 右fc) | ジェスチャー |
+|:---:|------------|
+| 1 | ピンチイン・アウト (ズーム) |
+| 2 | プレス＆ホールド (ドラッグ) |
+| 3 | 3F スワイプ (ブラウザ進む/戻る等) |
 
-**3F の組み合わせ**は意図的に除外されている。
-3F タップ等の通常操作と干渉しないようにするため。
-
-### 将来の拡張候補
-
-| max | 候補ジェスチャー | 状態 |
-|:---:|-----------------|------|
-| 1 | ピンチイン・アウト (ズーム) | ✅ 実装済み |
-| 2 | プレス＆ホールド (ドラッグ) | ✅ 実装済み |
-| 3 | 未定 | 予約（未実装） |
+※ 両側に 1 本以上の指がある場合のみジェスチャーが発動する（片側 fc=0 では NONE）。
 
 割り当ての変更は `iqs9151_cross_pad_resolve()` の switch 文を編集するだけで可能。
 
@@ -177,6 +173,26 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 `MAX(local_fc, peer_fc) == 2` が維持される限り継続。
 1F 側を一旦離して再タッチしてもホールドが継続するため、
 カーソル位置の調整が可能。
+
+### 3F スワイプ
+どちらかの側が 3F でタッチしている状態で水平にスワイプすると、
+プリセットで定義されたキーストローク（ブラウザの進む/戻る等）を送信する。
+`MAX(local_fc, peer_fc) == 3` が維持される限り継続。
+
+**動作の詳細:**
+- セントロイドデルタ X を蓄積し、`CROSS_PAD_SWIPE_THRESHOLD`（デフォルト 80px）を超えると発火
+- 一度発火するとロックされ、片側の fc が一度 0 に落ちるまで再発火しない
+- ロックリセット後はクールタイム（`CROSS_PAD_SWIPE_COOLDOWN_MS`、デフォルト 100ms）を設け、
+  蓄積されたペリフェラルの移動データを破棄してから新しいスワイプの蓄積を開始
+- どちらの側でスワイプしても動作する（ペリフェラルはセントロイドデルタを MSC で送信）
+- キーストロークは `zmk_hid_implicit_modifiers_press` を使用し、ユーザーが押しているキーと干渉しない
+
+**プリセット** (`CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_PRESET`):
+| 値 | 内容 | キーストローク |
+|:--:|------|---------------|
+| 0 | macOS ブラウザ進む/戻る（デフォルト） | Cmd+[ / Cmd+] |
+| 1 | Windows/Linux ブラウザ進む/戻る | Alt+← / Alt+→ |
+| 2 | macOS ワークスペース切り替え | Ctrl+← / Ctrl+→ |
 
 ## 修飾キー・ボタンの送信
 
@@ -195,6 +211,10 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 **プレス＆ホールドのボタン**: BTN_0 (左クリック) 固定。
 `zmk_hid_mouse_button_press(0)` / `zmk_hid_mouse_button_release(0)` で直接操作。
 
+**スワイプのキーストローク**: `zmk_hid_implicit_modifiers_press()` + `zmk_hid_keyboard_press()` で
+修飾キー＋キーを press → send → release → send する。implicit modifiers を使用することで、
+ユーザーが別のキーを押している状態でも干渉しない。
+
 **central 側のみで実行** — HID レポートは central が生成するため。
 詳細は [実装設計](cross_pad_gesture_implementation.md) を参照。
 
@@ -210,7 +230,7 @@ BTN_0 (左クリック) を押しっぱなしにし、カーソル移動でド�
 |---------|------|
 | `drivers/input/iqs9151.c` | クロスパッド関数群、process_frame 分岐、proxy_cb |
 | `drivers/input/CMakeLists.txt` | ZMK app include パスの追加 |
-| `drivers/input/Kconfig` | `CROSS_PAD`, `CROSS_PAD_SIDE`, `CROSS_PAD_PINCH_GAIN_X10`, `CROSS_PAD_PINCH_MODIFIER`, `CROSS_PAD_PINCH_INVERT` |
+| `drivers/input/Kconfig` | `CROSS_PAD`, `CROSS_PAD_SIDE`, `CROSS_PAD_PINCH_GAIN_X10`, `CROSS_PAD_PINCH_MODIFIER`, `CROSS_PAD_PINCH_INVERT`, `CROSS_PAD_SWIPE_PRESET`, `CROSS_PAD_SWIPE_THRESHOLD` |
 | `dts/bindings/input/azoteq,iqs9151.yaml` | `cross-pad-peer-input` phandle プロパティ |
 | `behaviors/behavior_pad_touch.c` | `pdt` ビヘイビア (central → peripheral 通信の受信側) |
 | `dts/bindings/behaviors/zmk,behavior-pad-touch.yaml` | DT バインディング (`#binding-cells = 2`) |
@@ -466,3 +486,34 @@ fc=0 になった時のみ、`CROSS_PAD_NOTIFY_RETRY_MS`（30ms）間隔で
 **残存リスク:** リトライ送信でも全ての再送が欠落する可能性はゼロではないが、
 3回（初回 + リトライ2回）の送信で欠落確率は大幅に低下する。
 万一発生しても、両側にタッチすることで自己回復する。
+
+### 3F スワイプの多重発火
+
+スワイプジェスチャーが一回のスワイプ動作で複数回発火する問題。
+特にトラックパッドの端付近、ゆっくりしたスワイプ、動きを止めて再開した場合に発生しやすかった。
+
+**原因分析:**
+
+スワイプ発火後のロックリセット機構（片側の fc が一度 0 に落ちた時にロックを解除する）において、
+以下の問題が複合していた:
+
+1. **ペリフェラルの蓄積データの残留**: ロックリセット時に `peer_rel_x` をクリアしていなかった。
+   fc が一瞬揺れてロックがリセットされると、その間に蓄積されたペリフェラルの移動データが
+   次のフレームで一気に `swipe_accum` に加算され、閾値を即座に超えて再発火していた
+
+2. **ロックリセット直後の過渡データ**: リセット直後はペリフェラルからの BLE データが
+   過渡的な状態を含んでおり、そのまま蓄積すると誤発火の原因になる
+
+**対策（実装済み）:**
+
+1. **ロックリセット時のデータクリア**: `peer_rel_x`/`peer_rel_y` をリセットと同時にクリア
+2. **クールタイム**: ロックリセット後 `CROSS_PAD_SWIPE_COOLDOWN_MS`（100ms）の間、
+   全ての移動データ（ローカル・ペリフェラル）を破棄する
+3. **クールタイム明けの再クリア**: クールタイムが終了した最初のフレームで、
+   クールタイム中に蓄積されたペリフェラルデータを再度破棄してからクリーンスタート
+
+**検討したが不採用とした対策:**
+
+| 対策 | 不採用理由 |
+|------|-----------|
+| `swipe_continuing` に `local_fc > 0 && peer_fc > 0` を追加 | fc が一瞬でも 0 に落ちるとスワイプが完全終了してしまい、3F 維持中に片側の fc が揺れただけで BTN2 発動やカーソル移動になるなど、操作感が悪化した |

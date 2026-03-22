@@ -110,6 +110,11 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define CROSS_PAD_NOTIFY_RETRY_MS   30    /* interval between retransmissions */
 #define CROSS_PAD_PINCH_WHEEL_GAIN_X10 CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10
 #define CROSS_PAD_PINCH_WHEEL_GAIN_DEN 10
+#define CROSS_PAD_SWIPE_THRESHOLD CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_THRESHOLD
+#define CROSS_PAD_SWIPE_COOLDOWN_MS 100   /* post-lock-reset cooldown (ms) */
+#define CROSS_PAD_SWIPE_PRESET_MACOS_BROWSER  0
+#define CROSS_PAD_SWIPE_PRESET_WINDOWS_BROWSER 1
+#define CROSS_PAD_SWIPE_PRESET_MACOS_WORKSPACE 2
 #if defined(CONFIG_INPUT_IQS9151_CROSS_PAD_SIDE_LEFT)
 #define CROSS_PAD_LOCAL_SIGN  (-1)
 #define CROSS_PAD_PEER_SIGN   (1)
@@ -285,6 +290,12 @@ struct iqs9151_data {
     struct k_work_delayable cross_pad_notify_retry_work;
     uint8_t cross_pad_notify_retry_fc;    /* fc value to re-send */
     uint8_t cross_pad_notify_retry_remaining; /* retries left */
+    bool cross_pad_swipe_active;     /* swipe gesture is active */
+    bool cross_pad_swipe_fired;      /* swipe keystroke already fired this swipe */
+    int32_t cross_pad_swipe_accum;   /* accumulated centroid delta X for swipe */
+    uint8_t cross_pad_swipe_prev_local_fc;  /* for detecting fc drop to reset lock */
+    uint8_t cross_pad_swipe_prev_peer_fc;   /* for detecting fc drop to reset lock */
+    int64_t cross_pad_swipe_cooldown_until; /* uptime ms: ignore accum until this */
 #endif
 };
 
@@ -1812,7 +1823,19 @@ void iqs9151_set_peer_state(const struct device *dev, uint8_t finger_count) {
             LOG_DBG("cross-pad pinch: end (peer update)");
         }
     }
+
 #endif
+
+    if (data->cross_pad_swipe_active && max_fc != 3U) {
+        data->cross_pad_swipe_active = false;
+        data->cross_pad_swipe_fired = false;
+        data->cross_pad_swipe_accum = 0;
+        data->cross_pad_centroid_valid = false;
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+        iqs9151_cross_pad_gate_update(false);
+        LOG_DBG("cross-pad swipe: end (peer update)");
+    }
 }
 
 void iqs9151_set_peer_rel_x(const struct device *dev, int16_t rel_x) {
@@ -1840,6 +1863,7 @@ enum cross_pad_gesture {
     CROSS_PAD_GESTURE_NONE = 0,
     CROSS_PAD_GESTURE_PINCH,
     CROSS_PAD_GESTURE_PRESS_HOLD,
+    CROSS_PAD_GESTURE_SWIPE,
 };
 
 static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
@@ -1850,7 +1874,7 @@ static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
     switch (MAX(local_fc, peer_fc)) {
     case 1:  return CROSS_PAD_GESTURE_PINCH;       /* both 1F → pinch */
     case 2:  return CROSS_PAD_GESTURE_PRESS_HOLD;  /* either 2F → press & hold */
-    case 3:  return CROSS_PAD_GESTURE_NONE;         /* either 3F → reserved */
+    case 3:  return CROSS_PAD_GESTURE_SWIPE;        /* either 3F → swipe */
     default: return CROSS_PAD_GESTURE_NONE;
     }
 }
@@ -1907,6 +1931,42 @@ static void iqs9151_cross_pad_hold_press(void) {
 static void iqs9151_cross_pad_hold_release(void) {
     zmk_hid_mouse_button_release(0); /* BTN_0 = left click */
     zmk_endpoints_send_mouse_report();
+}
+
+/*
+ * Swipe keystroke: send a key tap (press + release) based on direction and preset.
+ * Uses implicit modifiers so they don't interfere with any user-held modifiers.
+ */
+static void iqs9151_cross_pad_swipe_tap(bool is_right) {
+    uint8_t mods;
+    zmk_key_t key;
+
+    switch (CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_PRESET) {
+    case CROSS_PAD_SWIPE_PRESET_MACOS_BROWSER:
+        mods = 0x08; /* LGUI */
+        key = is_right ? 0x30 : 0x2F; /* ] or [ */
+        break;
+    case CROSS_PAD_SWIPE_PRESET_WINDOWS_BROWSER:
+        mods = 0x04; /* LAlt */
+        key = is_right ? 0x4F : 0x50; /* Right Arrow or Left Arrow */
+        break;
+    case CROSS_PAD_SWIPE_PRESET_MACOS_WORKSPACE:
+        mods = 0x01; /* LCtrl */
+        key = is_right ? 0x4F : 0x50; /* Right Arrow or Left Arrow */
+        break;
+    default:
+        return;
+    }
+
+    /* Press: modifiers + key */
+    zmk_hid_implicit_modifiers_press(mods);
+    zmk_hid_keyboard_press(key);
+    zmk_endpoints_send_report(HID_USAGE_KEY);
+
+    /* Release: key + modifiers */
+    zmk_hid_keyboard_release(key);
+    zmk_hid_implicit_modifiers_release();
+    zmk_endpoints_send_report(HID_USAGE_KEY);
 }
 #endif /* CENTRAL || !SPLIT */
 
@@ -2139,7 +2199,7 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
      * This prevents transient fc (e.g. placing 2 fingers one at a time) from
      * briefly triggering the wrong gesture.
      */
-    const bool gesture_active = data->cross_pad_ctrl_pressed || data->cross_pad_hold_active;
+    const bool gesture_active = data->cross_pad_ctrl_pressed || data->cross_pad_hold_active || data->cross_pad_swipe_active;
 
     if (!gesture_active && gesture != CROSS_PAD_GESTURE_NONE) {
         /* A gesture wants to start, but we may need to stabilize first */
@@ -2184,10 +2244,15 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
 
     const bool pinch_now = (gesture == CROSS_PAD_GESTURE_PINCH);
     const bool hold_now_resolve = (gesture == CROSS_PAD_GESTURE_PRESS_HOLD);
+    const bool swipe_now_resolve = (gesture == CROSS_PAD_GESTURE_SWIPE);
 
     /* Press & hold: stateful — stays active while MAX(local_fc, peer_fc) == 2 */
     const bool hold_continuing = data->cross_pad_hold_active && (max_fc == 2U);
     const bool hold_now = hold_now_resolve || hold_continuing;
+
+    /* Swipe: stateful — stays active while MAX(local_fc, peer_fc) == 3 */
+    const bool swipe_continuing = data->cross_pad_swipe_active && (max_fc == 3U);
+    const bool swipe_now = swipe_now_resolve || swipe_continuing;
 
     /* === Pinch transitions === */
 
@@ -2242,6 +2307,50 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
         LOG_DBG("cross-pad hold: end");
     }
 
+    /* === Swipe transitions === */
+
+    if (swipe_now && !data->cross_pad_swipe_active) {
+        /* Entering swipe */
+        iqs9151_cross_pad_cleanup_normal(data);
+        data->cross_pad_swipe_active = true;
+        data->cross_pad_swipe_fired = false;
+        data->cross_pad_swipe_accum = 0;
+        data->cross_pad_centroid_valid = false;
+        data->cross_pad_swipe_prev_local_fc = local_fc;
+        data->cross_pad_swipe_prev_peer_fc = peer_fc;
+        LOG_DBG("cross-pad swipe: start");
+    }
+
+    if (!swipe_now && data->cross_pad_swipe_active) {
+        /* Leaving swipe */
+        data->cross_pad_swipe_active = false;
+        data->cross_pad_swipe_fired = false;
+        data->cross_pad_swipe_accum = 0;
+        data->cross_pad_centroid_valid = false;
+        data->cross_pad_peer_rel_x = 0;
+        data->cross_pad_peer_rel_y = 0;
+        iqs9151_cross_pad_gate_update(false);
+        LOG_DBG("cross-pad swipe: end");
+    }
+
+    /* Swipe lock reset: if either side's fc dropped to 0 while swipe continues */
+    if (swipe_now && data->cross_pad_swipe_active) {
+        if ((local_fc == 0U && data->cross_pad_swipe_prev_local_fc != 0U) ||
+            (peer_fc == 0U && data->cross_pad_swipe_prev_peer_fc != 0U)) {
+            data->cross_pad_swipe_fired = false;
+            data->cross_pad_swipe_accum = 0;
+            data->cross_pad_centroid_valid = false;
+            data->cross_pad_peer_rel_x = 0;
+            data->cross_pad_peer_rel_y = 0;
+            data->cross_pad_swipe_cooldown_until =
+                k_uptime_get() + CROSS_PAD_SWIPE_COOLDOWN_MS;
+            LOG_DBG("cross-pad swipe: lock reset (fc dropped), cooldown %d ms",
+                    CROSS_PAD_SWIPE_COOLDOWN_MS);
+        }
+        data->cross_pad_swipe_prev_local_fc = local_fc;
+        data->cross_pad_swipe_prev_peer_fc = peer_fc;
+    }
+
     /* === Active gesture processing === */
 
     if (pinch_now) {
@@ -2279,6 +2388,59 @@ static bool iqs9151_cross_pad_handle(struct iqs9151_data *data,
         }
 #else
         iqs9151_cross_pad_send_rel_xy(data, dx, dy);
+#endif
+        return true;
+    }
+
+    if (swipe_now) {
+        int16_t dx, dy;
+        iqs9151_cross_pad_effective_rel(data, frame, &dx, &dy);
+
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) || !IS_ENABLED(CONFIG_ZMK_SPLIT)
+        if (!data->cross_pad_swipe_fired) {
+            /* Cooldown after lock reset: discard all movement until
+             * the cooldown expires, then flush stale peer data. */
+            if (data->cross_pad_swipe_cooldown_until != 0) {
+                if (k_uptime_get() < data->cross_pad_swipe_cooldown_until) {
+                    /* Still in cooldown — discard */
+                    data->cross_pad_peer_rel_x = 0;
+                    data->cross_pad_peer_rel_y = 0;
+                    goto swipe_done;
+                }
+                /* Cooldown just expired — flush stale peer data */
+                data->cross_pad_peer_rel_x = 0;
+                data->cross_pad_peer_rel_y = 0;
+                data->cross_pad_swipe_cooldown_until = 0;
+                LOG_DBG("cross-pad swipe: cooldown expired, peer data flushed");
+                goto swipe_done;
+            }
+
+            /* Accumulate both local and peer X delta */
+            data->cross_pad_swipe_accum += dx;
+            data->cross_pad_swipe_accum += data->cross_pad_peer_rel_x;
+            data->cross_pad_peer_rel_x = 0;
+            data->cross_pad_peer_rel_y = 0;
+
+            if (data->cross_pad_swipe_accum > CROSS_PAD_SWIPE_THRESHOLD) {
+                /* Right swipe */
+                iqs9151_cross_pad_swipe_tap(true);
+                data->cross_pad_swipe_fired = true;
+                LOG_DBG("cross-pad swipe: fired RIGHT");
+            } else if (data->cross_pad_swipe_accum < -CROSS_PAD_SWIPE_THRESHOLD) {
+                /* Left swipe */
+                iqs9151_cross_pad_swipe_tap(false);
+                data->cross_pad_swipe_fired = true;
+                LOG_DBG("cross-pad swipe: fired LEFT");
+            }
+        } else {
+            /* Fired — discard movement until lock reset */
+            data->cross_pad_peer_rel_x = 0;
+            data->cross_pad_peer_rel_y = 0;
+        }
+swipe_done:
+#else
+        /* Peripheral: send centroid delta X to central via MSC */
+        iqs9151_cross_pad_send_rel_x(data, dx);
 #endif
         return true;
     }
@@ -2327,6 +2489,9 @@ static void iqs9151_cross_pad_flush_peer(const struct device *dev) {
             iqs9151_report_rel_event(data->dev, INPUT_REL_Y, py,
                                       true, K_NO_WAIT);
         }
+    } else if (data->cross_pad_swipe_active) {
+        /* Swipe active: just accumulate peer X; threshold check is in cross_pad_handle.
+         * peer_rel_x is left as-is for cross_pad_handle to consume. */
     }
 }
 

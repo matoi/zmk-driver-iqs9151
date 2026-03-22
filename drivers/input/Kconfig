@@ -402,6 +402,26 @@ config INPUT_IQS9151_CROSS_PAD_PINCH_INVERT
       Use this when the scroll direction transform in your input-processor
       chain causes pinch zoom to work in the opposite direction.
 
+config INPUT_IQS9151_CROSS_PAD_SWIPE_PRESET
+    int "Cross-pad swipe keystroke preset (0=macOS browser, 1=Windows browser, 2=macOS workspace)"
+    range 0 2
+    default 0
+    help
+      Preset for the keystroke sent on cross-pad 3-finger swipe.
+      Sent directly via HID, independent of keymap configuration.
+        0 = macOS browser back/forward (Cmd+[ / Cmd+])
+        1 = Windows/Linux browser back/forward (Alt+Left / Alt+Right)
+        2 = macOS workspace switch (Ctrl+Left / Ctrl+Right)
+
+config INPUT_IQS9151_CROSS_PAD_SWIPE_THRESHOLD
+    int "Cross-pad swipe threshold (centroid delta pixels)"
+    range 10 500
+    default 80
+    help
+      Accumulated centroid delta X threshold to trigger a swipe action.
+      Lower values make swipe more sensitive, higher values require
+      more deliberate movement.
+
 endif # INPUT_IQS9151_CROSS_PAD
 
 config INPUT_IQS9151_TEST

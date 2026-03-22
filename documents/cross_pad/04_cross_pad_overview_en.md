@@ -15,13 +15,13 @@ distributed across two physically separate devices connected via BLE.
 
 ### Supported Gestures
 
-| Left | Right | Gesture |
-|:----:|:-----:|---------|
-| 1F | 1F | **Pinch zoom** — move fingers apart/together horizontally to zoom in/out |
-| 1F | 2F | **Press & hold** — left-click held + cursor movement (drag & drop) |
-| 2F | 1F | **Press & hold** — same as above |
-| 2F | 2F | **Press & hold** — same as above |
-| 3F | any | None (reserved for future use) |
+| MAX(left, right) | Gesture |
+|:---:|---------|
+| 1 | **Pinch zoom** — move fingers apart/together horizontally to zoom in/out |
+| 2 | **Press & hold** — left-click held + cursor movement (drag & drop) |
+| 3 | **3F swipe** — horizontal swipe sends keystroke (e.g. browser back/forward) |
+
+Gestures only activate when both sides have at least one finger (`fc > 0`).
 
 Gesture assignment is controlled by a simple dispatch table (`iqs9151_cross_pad_resolve()`).
 Changing which gesture maps to which finger combination requires editing only a single
@@ -58,6 +58,7 @@ enum cross_pad_gesture {
     CROSS_PAD_GESTURE_NONE = 0,
     CROSS_PAD_GESTURE_PINCH,
     CROSS_PAD_GESTURE_PRESS_HOLD,
+    CROSS_PAD_GESTURE_SWIPE,
 };
 
 static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
@@ -68,7 +69,7 @@ static enum cross_pad_gesture iqs9151_cross_pad_resolve(uint8_t local_fc,
     switch (MAX(local_fc, peer_fc)) {
     case 1:  return CROSS_PAD_GESTURE_PINCH;       /* both 1F → pinch */
     case 2:  return CROSS_PAD_GESTURE_PRESS_HOLD;  /* either 2F → press & hold */
-    case 3:  return CROSS_PAD_GESTURE_NONE;         /* either 3F → reserved */
+    case 3:  return CROSS_PAD_GESTURE_SWIPE;        /* either 3F → swipe */
     default: return CROSS_PAD_GESTURE_NONE;
     }
 }
@@ -108,6 +109,14 @@ when either side lifts all fingers.
 **Press & hold (stateful):** Once started, remains active as long as
 `MAX(local_fc, peer_fc) == 2`. The 1F side can be lifted and re-placed
 (to reposition for continued dragging) without ending the hold.
+
+**3F Swipe (stateful):** Once started, remains active as long as
+`MAX(local_fc, peer_fc) == 3`. Accumulates horizontal centroid delta X until the
+threshold (`CROSS_PAD_SWIPE_THRESHOLD`, default 80px) is exceeded, then fires a
+preset keystroke (e.g. Cmd+[ for browser back). After firing, the swipe locks
+until one side's `fc` drops to 0, then becomes re-armable. A post-unlock cooldown
+(`CROSS_PAD_SWIPE_COOLDOWN_MS`, 100ms) discards stale peripheral data to prevent
+accidental re-firing.
 
 ### Direct HID Report Manipulation
 
@@ -278,6 +287,8 @@ manifest:
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_GAIN_X10` | int | `40` | Pinch wheel output gain (10=1.0x, 40=4.0x, 80=8.0x) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_MODIFIER` | int | `1` | Pinch modifier (0=none, 1=LCtrl, 2=MB4) |
 | `CONFIG_INPUT_IQS9151_CROSS_PAD_PINCH_INVERT` | bool | `n` | Invert pinch wheel direction (for scroll-transform users) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_PRESET` | int | `0` | Swipe keystroke preset (0=macOS browser, 1=Windows browser, 2=macOS workspace) |
+| `CONFIG_INPUT_IQS9151_CROSS_PAD_SWIPE_THRESHOLD` | int | `80` | Centroid delta threshold to trigger swipe (pixels) |
 
 **Modifier options:**
 - `1` (Left Ctrl): Ctrl+Wheel zoom on most OSes (default)
@@ -350,6 +361,23 @@ Mitigations already in place:
 
 The remaining asymmetry is inherent to BLE transport and does not significantly
 impact usability in practice.
+
+### 3F Swipe Multiple Firing
+
+A single swipe gesture could fire the keystroke multiple times, especially
+near trackpad edges, during slow swipes, or when stopping and resuming movement.
+
+**Root cause:** When `fc` briefly fluctuates (e.g. at trackpad edges), the swipe
+lock-reset mechanism would unlock the swipe while stale peripheral movement data
+(`peer_rel_x`) remained accumulated. This data would immediately push `swipe_accum`
+past the threshold on the next frame, causing an unintended re-fire.
+
+**Mitigation (implemented):**
+- Clear `peer_rel_x`/`peer_rel_y` at lock reset
+- 100ms cooldown after lock reset, during which all movement data is discarded
+- Flush peer data again when cooldown expires before starting fresh accumulation
+
+Status: Improvement confirmed, under observation.
 
 ## Related Documents (Japanese)
 
