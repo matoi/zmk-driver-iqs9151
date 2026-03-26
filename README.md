@@ -12,6 +12,11 @@ This is an independent PoC extension, developed in a separate repository.
 - 🔀 **[feature/cross-pad-gesture ブランチ](https://github.com/matoi/zmk-driver-iqs9151/tree/feature/cross-pad-gesture)**
 - 📋 **[設定例リポジトリ](https://github.com/matoi/zmk-config-LalaPadGen2-cross-pad-gesture-example)**
 
+> **留意事項:**
+> - 両側のトラックパッドにほぼ同時に指を置いた場合、cross-pad ジェスチャーが開始する前に通常の操作（ボタン press/release やカーソル移動等）が一瞬発生することがあります。max_fc == 2 以上（プレス＆ホールド、3F スワイプ）の場合に顕著です
+> - 上記の状態で片側のトラックパッドを操作し続けると、ボタンの down → up が連続して繰り返される場合があります
+> - 通常処理の開始に若干の遅延を設けることで解消する見込みですが、未実装です
+
 ---
 
 私が自作したIQS9151トラックパッドモジュールをZMKで使用するための専用ドライバです。

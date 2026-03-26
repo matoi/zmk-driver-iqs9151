@@ -27,6 +27,13 @@ Gesture assignment is controlled by a simple dispatch table (`iqs9151_cross_pad_
 Changing which gesture maps to which finger combination requires editing only a single
 `switch` statement.
 
+> **Note:** When placing fingers on both trackpads nearly simultaneously, normal input
+> processing (button press/release, cursor movement) may briefly run before the
+> cross-pad gesture activates. This is more noticeable with press & hold and 3F swipe.
+> Additionally, repeated button down/up events may occur if one side continues to be
+> operated in this state. Adding a short delay before starting normal processing is
+> expected to resolve these issues, but this has not been implemented yet.
+
 ## Architecture
 
 ### Hardware Layout
